@@ -1,0 +1,1192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Unofficial fan tool: scan Rust vending-machine screenshots, pin shops on the server map and search every shop you've seen.">
+<style>body{margin:0}img{max-width:100%}</style>
+<title>Rust Shop Finder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: one working column — header + tabs, then the active panel. Dark, game-UI look on purpose (single theme). */
+:root{
+  --bg:#1c1916;          /* panel brown-black, like the in-game map UI */
+  --surface:#28241f;
+  --row:#3c3733;         /* in-game shop row grey */
+  --line:#4a443e;
+  --fg:#e9e2d8;
+  --muted:#a69d91;
+  --accent:#8cc32a;      /* Rust map shop-marker lime */
+  --accent-ink:#1c1916;
+  --warn:#e0a43a;
+  --bad:#d4584a;
+  --bad-bg:#45231c;
+  --display:"Barlow Semi Condensed","Roboto Condensed","Arial Narrow",sans-serif;
+  --body:"Barlow","Segoe UI",system-ui,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{background:var(--bg);color:var(--fg)}
+body{font-family:var(--body);font-size:15px;line-height:1.45;padding-inline:16px;padding-block:0 48px}
+.wrap{max-width:1100px;margin:0 auto}
+h1,h2,h3,.tab,.label,.btn,th{font-family:var(--display)}
+header.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 24px;padding-block:20px 12px}
+.brand{display:flex;align-items:center;gap:12px}
+.mark{width:40px;height:40px;border-radius:50%;background:var(--accent);display:grid;place-items:center;flex:none}
+.mark svg{width:22px;height:22px}
+h1{margin:0;font-size:28px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;line-height:1}
+.sub{color:var(--muted);font-size:13px;margin-top:3px}
+.stats{display:flex;gap:18px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+.stat b{display:block;font-family:var(--display);font-size:22px;line-height:1;color:var(--fg)}
+.stat span{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+nav.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto;margin-bottom:18px}
+.tab{background:none;border:0;color:var(--muted);font-size:16px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:10px 14px;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+.tab .badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:6px;border-radius:9px;background:var(--warn);color:var(--accent-ink);font-size:12px;line-height:18px;text-align:center}
+.tab:focus-visible,.btn:focus-visible,input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.panel[hidden]{display:none}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);color:var(--fg);font-size:15px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:7px 14px;border-radius:3px;cursor:pointer}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{color:var(--bad);border-color:#6a3a32}
+.btn.small{font-size:13px;padding:4px 10px}
+.btn:disabled{opacity:.5;cursor:default}
+input[type=text],input[type=number],input[type=search],textarea,select{font:inherit;background:#15120f;color:var(--fg);border:1px solid var(--line);border-radius:3px;padding:7px 9px;min-width:0}
+textarea{width:100%;min-height:140px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.label{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.note{color:var(--muted);font-size:13px}
+.banner{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--warn);padding:10px 14px;margin-bottom:16px;border-radius:3px}
+.banner p{margin:0;min-width:0;flex:1 1 300px}
+/* Find */
+.searchbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+.searchbar input[type=search]{flex:1 1 260px;font-size:17px;padding:10px 12px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.seg button{background:none;border:0;color:var(--muted);font-family:var(--display);font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-size:14px;padding:8px 12px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--row);color:var(--fg)}
+.check{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--muted)}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:3px}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px 10px;background:var(--surface);border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid #322d28;vertical-align:middle;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right}
+.item{display:flex;align-items:center;gap:9px;min-width:0}
+.ico{width:40px;height:40px;border-radius:3px;background:var(--row);flex:none;object-fit:contain;image-rendering:auto}
+.ico.sm{width:24px;height:24px}
+.unnamed{color:var(--warn);font-style:italic}
+.pill{display:inline-block;font-family:var(--display);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:1px 7px;border-radius:9px;background:var(--row);color:var(--muted);white-space:nowrap}
+.pill.sold{background:var(--bad-bg);color:#f0a093}
+.pill.old{color:var(--warn)}
+.price{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.per{color:var(--muted);font-size:12px}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+/* Scan */
+.drop{border:2px dashed var(--line);border-radius:4px;padding:26px 18px;text-align:center;background:var(--surface);cursor:pointer}
+.drop.over{border-color:var(--accent);background:#2c3320}
+.drop h2{margin:0 0 4px;font-size:22px;text-transform:uppercase;letter-spacing:.04em}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:14px 0 0;padding:0;list-style:none;counter-reset:s}
+.steps li{counter-increment:s;background:var(--bg);border:1px solid var(--line);border-radius:3px;padding:8px 10px 8px 36px;position:relative;font-size:13px;text-align:left;color:var(--muted)}
+.steps li::before{content:counter(s);position:absolute;left:10px;top:7px;width:18px;height:18px;border-radius:50%;background:var(--row);color:var(--fg);font:600 12px/18px var(--display);text-align:center}
+.ocrstate{margin-top:10px;font-size:13px;color:var(--muted)}
+.cards{display:grid;gap:16px;margin-top:18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:14px;display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);gap:16px}
+@media (max-width:760px){.card{grid-template-columns:minmax(0,1fr)}}
+.card .preview{width:100%;border-radius:3px;border:1px solid var(--line);background:#000}
+.card .meta{display:grid;gap:10px;align-content:start;min-width:0}
+.field{display:grid;gap:4px}
+.card h3{margin:0;font-size:18px;text-transform:uppercase;letter-spacing:.03em}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;padding:2px 8px;border-radius:10px;background:var(--row);color:var(--muted)}
+.chip.done{background:#2f3a20;color:#c8e59a}
+.rowsedit{display:grid;gap:6px}
+.redit{display:grid;grid-template-columns:minmax(0,1.5fr) 64px minmax(0,1.5fr) 72px 96px;gap:8px;align-items:center;background:var(--row);padding:6px 8px;border-radius:3px}
+.redit.sold{background:#4a2a22}
+.redit .slot{display:flex;align-items:center;gap:6px;min-width:0}
+.redit .slot .ico{width:40px;height:40px}
+.redit .slot input{width:100%}
+.redit input.qty{width:100%;text-align:right}
+.redit .hdr{font-family:var(--display);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.redit.head{background:none;padding:0 8px}
+@media (max-width:620px){.redit{grid-template-columns:minmax(0,1fr) 64px}.redit.head{display:none}}
+input.ok{border-color:#4f6b2a}
+input.guess{border-color:var(--warn);background:#2e2414}
+input.new{border-color:var(--bad);background:#2c1714}
+.cardfoot{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;grid-column:1/-1;border-top:1px solid var(--line);padding-top:10px}
+.warns{font-size:13px;color:var(--warn)}
+.busy{color:var(--muted);font-size:14px}
+/* Shops */
+.locs{display:grid;gap:14px}
+.loc{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:12px 14px}
+.lochead{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between}
+.lochead h3{margin:0;font-size:20px;letter-spacing:.03em;text-transform:uppercase}
+.bar{height:6px;background:var(--row);border-radius:3px;overflow:hidden;margin:8px 0 10px}
+.bar i{display:block;height:100%;background:var(--accent)}
+.shoplist{display:grid;gap:6px}
+details.shop{background:var(--bg);border:1px solid #352f29;border-radius:3px}
+details.shop summary{cursor:pointer;padding:7px 10px;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;list-style:none}
+details.shop summary::-webkit-details-marker{display:none}
+.sname{font-family:var(--display);font-weight:600;font-size:16px}
+.shop .body{padding:4px 10px 10px;display:grid;gap:8px}
+.unscanned{display:flex;justify-content:space-between;gap:10px;padding:7px 10px;border:1px dashed var(--line);border-radius:3px;color:var(--muted)}
+.inline{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+/* Icons */
+.icongrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px}
+.iconcard{display:flex;gap:10px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:3px;padding:8px}
+.iconcard .ico{width:60px;height:60px}
+.iconcard input{flex:1;min-width:0}
+.iconcard.needs{border-color:var(--warn)}
+.confirm{display:inline-flex;gap:6px;align-items:center}
+.looks{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.look{position:relative;display:inline-block}
+.look canvas{width:30px;height:30px;image-rendering:pixelated;border-radius:2px;display:block;border:1px solid var(--line)}
+.look button{position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:50%;border:0;background:var(--bad);color:#fff;font:700 11px/16px var(--body);padding:0;cursor:pointer}
+.iconcard{align-items:flex-start}
+.iconcard .acts{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+#undoBtn{white-space:nowrap}
+.backup{display:grid;gap:18px;max-width:760px}
+.backup section{display:grid;gap:8px}
+.backup h3{margin:0;font-size:18px;text-transform:uppercase;letter-spacing:.04em}
+footer.legal{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;line-height:1.5}
+footer.legal p{margin:0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ---- v2: map, pins, vendors ---- */
+.tab .badge.info{background:var(--row);color:var(--fg)}
+.srv{color:var(--muted);font-size:13px;margin-top:3px}
+.srv b{color:var(--fg);font-weight:600}
+.maptools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.maptools .grow{flex:1}
+.mapwrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,340px);gap:14px;align-items:start}
+@media (max-width:860px){.mapwrap{grid-template-columns:minmax(0,1fr)}}
+.mapview{position:relative;height:min(72vh,760px);min-height:320px;overflow:hidden;background:#0d1a22;border:1px solid var(--line);border-radius:4px;touch-action:none;cursor:grab;user-select:none}
+.mapview.dragging{cursor:grabbing}
+.mapview.placing{cursor:crosshair}
+.mapinner{position:absolute;left:0;top:0;width:1000px;height:1000px;transform-origin:0 0;--inv:1}
+.mapinner img{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;image-rendering:auto}
+.mapinner svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.mapinner svg line{stroke:rgba(0,0,0,.55);stroke-width:1;vector-effect:non-scaling-stroke}
+.mapinner svg text{fill:rgba(0,0,0,.75);font:600 5.5px var(--display)}
+.pin{position:absolute;width:0;height:0;transform:scale(var(--inv));transform-origin:0 0;z-index:2}
+.pin button{position:absolute;left:-15px;top:-38px;width:30px;height:38px;padding:0;border:0;background:none;cursor:pointer}
+.pin svg{width:30px;height:38px;display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
+.pin .n{position:absolute;left:0;right:0;top:6px;text-align:center;font:700 13px/16px var(--display);color:var(--accent-ink)}
+.pin .lbl{position:absolute;left:50%;top:3px;transform:translateX(-50%);white-space:nowrap;font:600 12px var(--display);letter-spacing:.03em;color:#fff;background:rgba(20,17,14,.85);padding:1px 6px;border-radius:3px;pointer-events:none;display:none}
+.mapinner.labels .pin .lbl,.pin.sel .lbl{display:block}
+.pin.sel{z-index:3}
+.pin.sel svg .body{fill:#fff}
+.pin.dim{opacity:.35}
+.mapmsg{position:absolute;inset:auto 12px 12px 12px;background:rgba(28,25,22,.95);border:1px solid var(--warn);border-radius:3px;padding:10px 12px;font-size:14px}
+.maphint{position:absolute;left:12px;top:12px;background:rgba(28,25,22,.92);border:1px solid var(--accent);border-radius:3px;padding:6px 10px;font-size:14px;pointer-events:none}
+.mapside{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:12px 14px;display:grid;gap:12px;max-height:min(72vh,760px);overflow:auto}
+@media (max-width:860px){.mapside{max-height:none}}
+.mapside h3{margin:0;font-size:20px;text-transform:uppercase;letter-spacing:.03em}
+.gridbig{font-family:var(--display);font-size:26px;font-weight:700;line-height:1;color:var(--accent)}
+.vcard{background:var(--bg);border:1px solid #352f29;border-radius:3px;padding:8px 10px;display:grid;gap:6px}
+.vcard.hl{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.vhead{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;justify-content:space-between}
+.vname{font-family:var(--display);font-weight:600;font-size:17px}
+.vgame{color:var(--muted);font-size:12px}
+.lrow{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;font-variant-numeric:tabular-nums;font-size:14px;min-width:0;padding:4px 0;border-top:1px solid #2e2924}
+.lrow:first-of-type{border-top:0}
+.lrow .what{display:flex;align-items:center;gap:6px;min-width:0;flex:1 1 100%}
+.lrow .what span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lrow .for{display:flex;align-items:center;gap:5px;white-space:nowrap;padding-left:30px;flex:1}
+.lrow .stk{min-width:64px;text-align:right;color:var(--muted);font-size:12px;white-space:nowrap}
+.unplaced{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 8px;border:1px dashed var(--line);border-radius:3px}
+details.mapset{margin-top:12px;background:var(--surface);border:1px solid var(--line);border-radius:4px}
+details.mapset summary{cursor:pointer;padding:9px 12px;font-family:var(--display);font-weight:600;letter-spacing:.05em;text-transform:uppercase}
+.setgrid{display:grid;gap:12px;padding:4px 12px 14px}
+.setrow{display:grid;grid-template-columns:minmax(0,160px) minmax(0,1fr);gap:8px;align-items:center}
+@media (max-width:620px){.setrow{grid-template-columns:minmax(0,1fr)}}
+.setrow .inline input[type=text]{flex:1 1 240px}
+.vsel{display:grid;gap:6px;background:var(--bg);border:1px solid #352f29;border-radius:3px;padding:8px}
+.vsel select{width:100%}
+.mini{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+.mini img{width:26px;height:26px;border-radius:2px;background:var(--row)}
+input.flag{border-color:var(--warn);background:#2e2414}
+.flagtxt{color:var(--warn);font-size:12px}
+.mapbtn{white-space:nowrap}
+.newpin{display:flex;flex-wrap:wrap;gap:6px}
+.newpin input{flex:1 1 180px}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div class="brand">
+    <div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#1c1916" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h2.2l2.3 11h10.2l2.1-8H6.4"/><circle cx="9" cy="19.2" r="1.4"/><circle cx="16.5" cy="19.2" r="1.4"/></svg></div>
+    <div><h1>Rust Shop Finder</h1><div class="srv" id="srvLine"></div></div>
+  </div>
+  <div class="inline"><div class="stats" id="stats"></div><button class="btn small" id="undoBtn" hidden></button></div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab" role="tab" id="tab-find" aria-selected="true" data-tab="find">Find</button>
+  <button class="tab" role="tab" id="tab-map" aria-selected="false" data-tab="map">Map<span class="badge" id="mapBadge" hidden></span></button>
+  <button class="tab" role="tab" id="tab-scan" aria-selected="false" data-tab="scan">Scan<span class="badge" id="scanBadge" hidden></span></button>
+  <button class="tab" role="tab" id="tab-shops" aria-selected="false" data-tab="shops">Shops</button>
+  <button class="tab" role="tab" id="tab-icons" aria-selected="false" data-tab="icons">Icons<span class="badge" id="iconBadge" hidden></span></button>
+  <button class="tab" role="tab" id="tab-backup" aria-selected="false" data-tab="backup">Backup &amp; wipe</button>
+</nav>
+
+<div id="noticeBanner" class="banner" hidden>
+  <p id="noticeText"></p>
+  <button class="btn small" id="noticeClose">Got it</button>
+</div>
+
+<!-- FIND -->
+<section class="panel" id="panel-find">
+  <div class="searchbar">
+    <input type="search" id="q" placeholder="Search an item, e.g. scrap, keycard, pie…" autocomplete="off">
+    <div class="seg" role="group" aria-label="Search side">
+      <button id="sideSell" aria-pressed="true" title="Shops selling this item">They sell</button>
+      <button id="sideBuy" aria-pressed="false" title="Shops paying with this item">They pay with</button>
+    </div>
+    <label class="check"><input type="checkbox" id="hideSold"> Hide sold out</label>
+  </div>
+  <div class="tablewrap"><table id="results"><thead><tr><th>Item</th><th class="num">Qty</th><th>Price</th><th class="num">Stock</th><th>Shop</th><th>Where</th><th>Seen</th><th></th></tr></thead><tbody></tbody></table></div>
+  <p class="note" id="resultNote"></p>
+</section>
+
+<!-- MAP -->
+<section class="panel" id="panel-map" hidden>
+  <div class="maptools">
+    <div class="seg" role="group" aria-label="Map picture">
+      <button id="mvIcons" aria-pressed="true">Monuments</button>
+      <button id="mvRaw" aria-pressed="false">Clean</button>
+    </div>
+    <label class="check"><input type="checkbox" id="mGrid"> Grid</label>
+    <button class="btn small primary" id="mAddPin">+ Add pin</button>
+    <span class="grow"></span>
+    <button class="btn small" id="mZoomOut" aria-label="Zoom out">−</button>
+    <button class="btn small" id="mZoomIn" aria-label="Zoom in">+</button>
+    <button class="btn small" id="mFit">Fit</button>
+  </div>
+  <div class="mapwrap">
+    <div class="mapview" id="mapview" tabindex="0" aria-label="Server map. Drag to move, scroll to zoom.">
+      <div class="mapinner" id="mapinner"><img id="mapimg" alt="" draggable="false"><svg id="mapgrid" viewBox="0 0 1000 1000" hidden></svg><div id="mappins"></div></div>
+      <div class="maphint" id="mapHint" hidden></div>
+      <div class="mapmsg" id="mapMsg" hidden></div>
+    </div>
+    <aside class="mapside" id="mapside"></aside>
+  </div>
+  <details class="mapset" id="mapSet">
+    <summary>Map settings</summary>
+    <div class="setgrid">
+      <div class="setrow"><label class="label" for="msSize">Map size</label><div class="inline"><input type="number" id="msSize" min="1000" max="8000" step="50" style="width:110px"><span class="note" id="msGridNote"></span></div></div>
+      <div class="setrow"><label class="label" for="msIcons">Monument map</label><div class="inline"><input type="text" id="msIcons" placeholder="Link to the map picture with monuments"><label class="btn small">Upload<input type="file" id="msIconsFile" accept="image/*" hidden></label><span class="note" id="msIconsNote"></span></div></div>
+      <div class="setrow"><label class="label" for="msRaw">Clean map</label><div class="inline"><input type="text" id="msRaw" placeholder="Link to the map picture without monuments (optional)"><label class="btn small">Upload<input type="file" id="msRawFile" accept="image/*" hidden></label><span class="note" id="msRawNote"></span></div></div>
+      <p class="note" style="margin:0">On rustmaps.com, open the server's map and use the image links, or download the PNG and upload it here. Uploaded pictures are kept in this browser. Pins stay where they are when you switch pictures.</p>
+    </div>
+  </details>
+</section>
+
+<!-- SCAN -->
+<section class="panel" id="panel-scan" hidden>
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Add screenshots">
+    <h2>Drop shop screenshots here</h2>
+    <div class="note">or click to choose files, or press Ctrl+V to paste a screenshot</div>
+    <ol class="steps">
+      <li>Open the map (G) and click a shop marker.</li>
+      <li>Expand one or more shops so their items show, then take a screenshot (F12 in Steam, or Win+Shift+S).</li>
+      <li>Expand the next shops and repeat until you've covered them all.</li>
+      <li>Drop them all here, pick the map pin, check what it read, and save.</li>
+    </ol>
+    <input type="file" id="file" accept="image/*" multiple hidden>
+  </div>
+  <div class="ocrstate" id="ocrState"></div>
+  <div class="inline" style="margin-top:12px" id="bulkActions" hidden>
+    <button class="btn primary" id="saveAll">Save all</button>
+    <button class="btn" id="discardAll">Discard all</button>
+  </div>
+  <div class="cards" id="cards"></div>
+</section>
+
+<!-- SHOPS -->
+<section class="panel" id="panel-shops" hidden>
+  <p class="note" style="margin-top:0">Every vendor, grouped by map pin. Give vendors your own nicknames so identical "A Shop"s are easy to tell apart. Names seen at a pin but not opened yet show as dashed rows.</p>
+  <div class="locs" id="locs"></div>
+</section>
+
+<!-- ICONS -->
+<section class="panel" id="panel-icons" hidden>
+  <p class="note" style="margin-top:0">Every item icon the scanner has learned. Rename one here and it updates everywhere. The small squares are the looks it matches against: if a different item got mixed in, remove that square with ×. Then rescan any shop that saved the wrong name.</p>
+  <div class="icongrid" id="icongrid"></div>
+</section>
+
+<!-- BACKUP & WIPE -->
+<section class="panel" id="panel-backup" hidden>
+  <div class="backup">
+    <section>
+      <h3>Export</h3>
+      <p class="note" style="margin:0">Your vendors, pins, price history and learned icons live only in this browser. Copy this text somewhere safe to keep a backup.</p>
+      <textarea id="exportBox" readonly aria-label="Export data"></textarea>
+      <div class="inline"><button class="btn" id="copyExport">Copy</button><span class="note" id="copyNote"></span></div>
+    </section>
+    <section>
+      <h3>Import</h3>
+      <p class="note" style="margin:0">Paste exported text or choose a saved .json file. Importing replaces what's here now.</p>
+      <textarea id="importBox" aria-label="Import data" placeholder="Paste exported data here"></textarea>
+      <div class="inline"><button class="btn" id="importBtn">Import</button><input type="file" id="importFile" accept=".json,application/json,text/plain"><span class="note" id="importNote"></span></div>
+    </section>
+    <section id="wipeSection">
+      <h3>New wipe or change server</h3>
+      <p class="note" style="margin:0">Clears every vendor, pin and recorded price for the current server and sets up the new map. Learned item icons are kept. Copy a backup first.</p>
+      <div class="setrow"><label class="label" for="nwName">Server name</label><input type="text" id="nwName" placeholder="e.g. Orange Dream"></div>
+      <div class="setrow"><label class="label" for="nwSize">Map size</label><input type="number" id="nwSize" min="1000" max="8000" step="50" style="width:110px"></div>
+      <div class="setrow"><label class="label" for="nwIcons">Monument map link</label><input type="text" id="nwIcons" placeholder="Map picture link (you can also upload it later on the Map tab)"></div>
+      <div class="setrow"><label class="label" for="nwRaw">Clean map link</label><input type="text" id="nwRaw" placeholder="Optional"></div>
+      <div class="inline"><button class="btn" id="nwCopy">Copy backup</button><span class="confirm" id="nwArea"><button class="btn danger" id="nwBtn">Start new wipe</button></span><span class="note" id="nwNote"></span></div>
+    </section>
+    <section>
+      <h3>Start over</h3>
+      <div class="inline"><span class="confirm" id="resetArea"><button class="btn danger" id="resetBtn">Delete everything</button></span></div>
+    </section>
+  </div>
+</section>
+<footer class="legal">
+  <p>Unofficial fan tool, not affiliated with Facepunch.</p>
+  <p>Rust, its item icons and all related game content belong to Facepunch Studios. Icons shown here come from your own screenshots. Map pictures come from the links or files you add.</p>
+</footer>
+</div>
+<datalist id="iconNames"></datalist>
+
+<script>
+/* text reader: own copy first, CDN as fallback */
+window.__tessLoad = new Promise(res=>{
+  const s=document.createElement('script');
+  s.src='ocr/tesseract.min.js';
+  s.onload=()=>res(true);
+  s.onerror=()=>{const t=document.createElement('script');t.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';t.onload=()=>res(true);t.onerror=()=>res(false);document.head.appendChild(t);};
+  document.head.appendChild(s);
+});
+</script>
+<script>/* starter item icons */
+window.SEED={"icons":{"1clowq8faq2v":{"name":"High Quality Spark Plugs","samples":["S0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFSkdFR0RCSkdFTUpITElHS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSUZERUJARUJBSUdFUE5MVFJQUE1LSUZESEVDSkZESkdFS0hGS0hGS0hGSkdFSkdFREJATk1LYF5dYF5dUE9NSEdFTEpHUU5LTUpHSEVDSkdFS0hGSkdFS0hGUk9MWFVTUlFQVVVUW1paWFdVQ0NAQkE+VVRQW1lVUE1KSUZDSkdFSEVDUk9NXlpXaWZiZGJfVFRTSUhIPDs6Ozk3RENBWFhVZ2ViXVpXTUlHSUZES0hGR0VDUE1LW1hVY19cV1RRRkRCOjg2NjQyR0VDYWBfY2NhVVNRTUtISUZES0hGS0hGQT47SEVDTElHS0hGR0RBQD07QT89T05NXl1cX15dVFJRSEVESkdFS0hGS0hGS0hGQ0A+REE/RkNBSUZERUNAPjw6SEdGXl5dWllZS0lIR0VDSUZES0hGS0hGS0hGS0hGS0hGS0hGS0hGRUJAQj89SklHU1JRS0pJPjw7PTo4RUJAS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGQj89RUNBTk5LSEdFOzk3Ozk3REE/SkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFREJARkRCRURBQT88RkNBSkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFR0RCRUJARUJARkNBSkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hG"],"thumb":"data:image/webp;base64,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","tw":70},"e4z6h84laq2v":{"name":"Scrap","samples":["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"],"thumb":"data:image/webp;base64,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","tw":70},"juama37zaq2v":{"name":"High Quality Crankshaft","samples":["S0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSUZESEVDSEVCSUZESUZES0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGRUJAPTs5Ojg2REJAS0hGSUZES0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSUZES0hGQkA+ODY0Ly4sOjg3RkRCR0RCS0hGS0hGS0hGS0hGS0hGS0hGSUZES0hGRkRCSUdFT01LS0lHPDs5Ojg3REE/R0RBS0hGS0hGS0hGS0hGS0hGR0RCSUZET0xLTk1MUE9NWFdVTUtJQD48PTo4RkNBSUZDS0hGS0hGSkdFSUZESEVDREE/Q0E/U1JRWFlYR0hHPz8+NTQyNTIwPjs5SEVDSkdFS0hGS0hGRUJAPjs6Q0A/SEZFTk1LVVRTRkZFLCwrKiopMjAuQD47SUZES0hGS0hGS0hGSEVDPjw6NjQzRURDUE9OVlVVUlFQSEZENTMyNzU0QT48SUZES0hGS0hGS0hGS0hGQ0E/SEZFUE9OWllYU1JRTUxMSkhHSUZEQkA9RkNBSUZES0hGS0hGS0hGS0hGS0hGODc0VVVTaGhnW1pZQ0JBOjk3Q0E/SkdFSUZES0hGS0hGS0hGS0hGS0hGS0hGS0hGOTc1TEtJUFBPPz48NzUzOzk3Pjw6RkNBSkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGQT88Ozk2NzUzPjs5REE/SUZDSUZDS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFRUJAQD47REE/SUZES0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hG"],"thumb":"data:image/webp;base64,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","tw":70},"p6oi9jocaq2v":{"name":"High Quality Pistons","samples":["S0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFSEVDSUZDSkdESkdFSkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSEVDREA+Q0A9REA+QT47QD47Qj88RUI/SEVDSUZES0hGS0hGS0hGS0hGS0hGSkdFSERCRkNATElGT0xJREE+Pzw5Q0A9S0dFRkNAREA+SUZES0hGSEVDSEVDSEVDSUZESkZESEVDTUpHUE5LSUdESkhFTktIUk5MREA+QT47SUVDQz89QT48QD06QT48RkNAREE/REE/SUVDS0hGSUdEVFJPUE5LREE+OTUyQD06SkdFPTk3QD06QD06Pjs4QD06QT48REE/R0RCR0RCS0hFVVNQSUdENjMwNTEuQj48S0hGYF1aa2lmYV9cSkhFQT48Qj89RUJARUJAR0RCSUVDSkdFRkNAPzw6Qj89SEVCS0hGaWZjamhkW1hVRUNAQj88R0RCR0RCRUJASEVDSUZESEVDSkdFS0hGS0hGS0hGS0hGUE1KRkNAOzg1Ojc0RkNBUU5LTUpISEVDR0NBSERCR0NBS0hGS0hGS0hGS0hGS0hGSUZEQ0A+QD07RkNBU09NVFBOTUpIRUE/REE+SUZDR0RCS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFSkdFS0hFTUpHSUZDSEVDSkdFSkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFTEhGS0hFS0hFSkdFSkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hG"],"thumb":"data:image/webp;base64,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","tw":70},"7g32i8jzaq2v":{"name":"High Quality Valves","samples":["S0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFS0dFSkZESUZES0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFS0hGSkdESEVCSEVDS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFTElHS0lGSkdFSEVCSUVDSUZESkdFSUZESUZES0hGS0hGS0hGS0hGS0hGS0hGTUpITktJTElGSEZDSEVDSkdFS0hGSUZER0RCSEVDSUdES0hGS0hGR0RCSEVDTUpHTkxJTUtIS0hGSUZES0hGS0hGSkdFSEVDSkhHTUtJSEZESUZES0hGPz07Qj89R0RCSEZDS0hGSkdFS0hGSkdFTElHVFFPVFJQS0lIRURCQT89RUJAS0hGQT48QD07Pjw5QT89SUZET0xKVFFPV1RSV1RRVVJQUU5MR0VDPDo5NTMxPTo4S0hGR0RCQ0E/QT88SkdFVFFPVVFPVVFPVlNQV1RSUU5MSkdFREE/QD07Ojg2QD08S0hGTktJT01LUE1LUU5LVFFPVVFPUE1KSkdFSUZES0hGS0hGS0hGS0hGSkdFSkdFS0hGTElHTkxKUk9NUU5MTElHSUZESkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGTEpISkdFSUZESkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hG"],"thumb":"data:image/webp;base64,UklGRkoFAABXRUJQVlA4WAoAAAAgAAAARQAASwAASUNDUMgBAAAAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADZWUDggXAMAAFASAJ0BKkYATAA+KRKIQqGhIRH6raAYAoSztVAtuCc7u3lo+0eYDY5/vX2AfJnMmWNTQvJP9G/9v3Bf1o/1HA8kkwvyCGx1nnjKOH/saD6ZtbWrGcxXVPy0vibmoqLS+u2rnTJtWvlvzfq22KotjOBvNwz+s7P/51bEqZyZtZfwwGkblMPeUCLbpZlCjUbFbYZbcRZA1In/Q3sgAP77lL/xyYFuizvR+Tdlh8/cIMtLhqhsxj/NVrAKY4MxqxzP/4xSCf/GA3QoNrL/zKEZ7aQCP2RW1C6XQgmQoYfjrn9Y9b6HSsUN0MAwUVTXMOfNTWADAxhWWHHt7iQVcQgKGS/gYXWkS3H0Spe+gOA8wfF/f5c7FSwR1LKAnGvGk63CL9biCxwZa4WvXCuoUF+rhYrvmJKhLow58WQ8xEZWF/hTAAV+EOXDY2feisdPXk1Sp/6/FfI0Yg8KClPDFOcc+vHOWldHgMZr7Vsbw09ZTp8ZQdqnXKlq2nCb7Y35QuyWP/Kb6clCmWweOhFUruryHydTJlFKsRZLXlK1Yb8jHQAOXkzY7hMBcGWhGmnSvifpN1PKN6AxtnL9XSannp8QSw3WILBchThwDCKnVyc4xWggI9N8FiiaqOwrhGFDqmA+oraTxgCYWJzZRV2X8A55aJsENizUqXVFPNo0nX7OLPtZ8+SvPlnqwXNOLPhrBgrmiKRAzx6blhF7m6TVR7IteAkjZWCtee9tPugMZOAg3fC/MHM4MgpzKUeLWe6PE/hKKHMhTPVIDWJ7/iU4njAmfryG6HDSfVDe+WgeW3qHXxcB+PYHrlF5y8TPssNUfkrvpGpKB78wvTMTI6+vPhJnbIp8rD8Q93m/c//X4yT9WN04HCT/f6eI6z+kOzZSCL2NxaRJq2XUx6VIxmYtF2XrsryEv/HVqzcB9nHAjT+qPVzD6aSXc977SYvhLssFkoLwYtR8Tq5KGdq1jx0DdhSv232v0agqyg859wwthKqF+qYDA+d5nuRdYb2t/TCDp4k3FMknecavfu2bQCdpU1WcNhDGgCDv9gUhA3ZIU09a8JpzMtYDZf7H/+6OmVQVqVxuvMbw88+DEBmOn9IlaT60hrV700thY3MRntcLRTCkGNlHXHDod9NwC+RJQAAA","tw":70},"wlv2cdpxaq2v":{"name":"High Quality Carburetor","samples":["S0hGSUZER0RCR0RCRkNBSEVDSkhGSkdFSUZES0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFSEVDREI/QD48QT8+SkhHUE5MU1FQTUtJR0RCSEVDSkdFS0hGS0hGS0hGS0hGR0RCR0RCRkRCQD49PTw7SUhHUlFPVFJQR0VDODUzPTo4SkdFS0hGS0hGS0hGS0hGR0RCREE/R0VDSUhHSUhHSEdGQkA/Ozo3Ozk2ODUxODQwPzs4Qj88SUZDS0hGS0hGSUZEQ0E+SEdEW1pZX19eT05MOzo4KysoNjUxPjw3NzQvMC0oNzMwREE+S0hGS0hGSkdFSEVDTkxKXFtaYWBfUU9OOjk3Ly4sRURBTkxJPDo2KCQgMi8sREA+S0hGS0hGS0hGSUZETUxKWFdWXVxcUE9OQD89Pz48U1FQXlxaU1FOODUyOzc1SEVDS0hGS0hGS0hGSkdFTUtKV1dWX15eVVRTRURCOjk3RUNCXl1cY2JgSEVDQD06SkdFS0hGS0hGS0hGSkdES0hGVVRTXFtaVlVURkVEMzIwOTc2VFNSWlhYRkRCQD07S0hGS0hGS0hGS0hGSkdFTUtJWllYXVxbU1JRRUNCOTg2QkA+V1ZVUlFPPjw6QD47S0hGS0hGS0hGS0hGS0hGTkxJXFtZYWBfVlVTSUdFS0lHV1VTYWBeUE9NPjw5QT48S0hGS0hGS0hGS0hGS0hGS0hGUE5MVVRSUU9NR0VCS0lEVFFNUU9MR0VCQ0A+RkNAS0hGS0hGS0hGS0hGS0hGS0hGSkdFS0hGSUdEQ0E+REE8RkM+REE+REA+R0RCSkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSUZERkI/RUI/SEVDS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hG"],"thumb":"data:image/webp;base64,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","tw":70},"eljcj71xaq2z":{"name":"Green Keycard","samples":["S0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFSUdESUdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFS0pHUFJOVFhTUVVQT1BMTUtJS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFSUhETE5JVlpUWV1ZUlZUUFRTW11cY2NiV1dVSklGSUdFS0hGS0hGSUdFSEhETE1HUFNLVFtQXmhdaW1pZ2doXFxfYmRlZWtnVlxWR0pFR0dDS0hGREVBRkpDTVFIVl5QXGZXZW5ibnZugYSBh4eHaGppVF5YTmBSSVlMRUpER0hES0hGO0Q9RE9EUl1PX2hZXmdbY2lid3l2ioqJfoJ/XmphTGBRRlxKR1RISUpFSkdFS0hGOkI8RE9FVF9UXmVcWl5YZWZkcXFwcHFvXmReSFVKQlFERk5FSUpGS0hGS0hGS0hGQ0RARktGV1tWaWtoaGhnZWhlYWRhVldTSU5IQkpCRElCSEdES0hGS0hGS0hGS0hGS0hGTEpIU1FQYWBfY2VjVl5XS1JLRkhDREdCR0dDSUdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0lHT0xKSktIP0dAPkY/REZCR0dDSkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFSEZEQ0RBQ0VBR0dESkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hG"],"thumb":"data:image/webp;base64,UklGRpQFAABXRUJQVlA4WAoAAAAgAAAARQAASwAASUNDUMgBAAAAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADZWUDggpgMAAJARAJ0BKkYATAA+KRKHQqGhCe1WogwBQllasNc2xwS0Hk7cbzAY8z6AHSxftzMkak7Xr4F4e6aZ5GPqTf2CTeJ4w0bDJZJDkkyDGFCBiAgoWBit74iST19v3RBk7/KrciKC0kaSKE6w/u7e/swnlYD5qnqzABOEwKAz0fnnavpa37YVsCqu/Pebp007OR3sQWh+HqAAAP76k//RK+bhnzaO/abUq2zGdClJen0VQMZsXYXFFLf/8ivPdv8YDcmXqr/x3oMfX/JhzpTXcdt5bAURXKXXDrAHx0NCXJ41lcgzEpz8zmsYvZsrbclZ1qUQ/fmJQ1YMAWklmxoRS5GT+C55tD0VG2LcfOD9R9xmsHlLTEDBIJ2pq2JPkXgUmoTml0wUsuVjAQw7AFDA/8k44JVx8j/l6Y32z6kM8RegQHAV2tNdeDhGmHW3nvYwgA3vfnPxSJ/mTd1I1xl5DC7tMBpCSyUUGXkRuwF84uSwht8EM8MwvODE3vCeRWq8yBHe/frnoEff/s3Ud4yfpprUhQv12NASoKluGZ1wHWf+1+z14fJgwSav/rXtmlhVBbf6PSfhN+cG0AFLqFezkV94KuhHP/Q+PoAt6L/N0VdGQFRxb8tYBGbQ0OHzftf4am1veOHlTXfkTVDpa7BNj/hT2zsQ/W75HVjnPzNnci6439KjZOtcLOQoyvZ27IW/NsMOLrhOVlEzZ5L7XR7X1xnefHeB8QhDvNb2a+h8x/Q6yLyeit0PlhD2KOySWEu/57USVslHoOUDvYh8m/G68CYOb2md7HVJE4BMFK4IuLZyAB56AWUmbfdMlbNH7C/kuhK0o/8So3mQ2dZeLxJZ6VgC4NqwuHas5unSTKfQ3zqN3aUE2CdMh4Sw9YlWi6d3NXOba1gmWodr7dydVi/hmP4AawH/ISNR2TCPcCpH2LrZjt4+42dCHmZ1Rc2WxbBfD9H8uxyCSwVa27Da8lc4oQVszgp2jXAxDzcW7iLtP66lLJlFUI1Ps6tT0uwBa5cij4uSoqlmuQD/knuwNS+Vhe2qKCyuEgX+a4sqYdWj5C450jqqVG0B41WxST+oy2tG5j4OYbN17U9iwxjBQsQWMGQdKgIkJqM6dC6IqExRIdp29USWDc2qLhgudtWbBoQ7BdScBZwiKgNRc1rypYSGeAJvhCUTnGBfxMFze6npnSFzBOY4PBj9H/8m3kD32/J3FryA2qHqwFYJSKss9qOsmoSXQ03IL+dGAAA=","tw":70},"kycaxlhxaq30":{"name":"High Quality Metal","samples":["S0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGT01LUU9OT0xKS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGTkxKV1ZVZGVjbW9tY2RjUU9NS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGbG1sd3p5f4ODiI2Nen9/YGJhVVZUUE9OTEpIS0hGS0hGS0hGS0hGS0hGS0hGS0hGeXx7fICAe39/goeHfoODcHR0YmVkWFpZUVFPTEpJSUdFSkdFS0hGS0hGS0hGS0hGbG1sb3Nya29va25ub3Fxc3d2aW1sXV9eU1NSTEtJQUA/Pz48REJASUZES0hGS0hGYGBfaGtqYWRjWFlZVVZVV1pZWFpZU1RSS0pJRkVENTY1Ky0sNjY1Q0E/S0hGS0hGVlVUWVlYU1RTR0dGOjw7NTg3Njk5Ojw7PD48Ojs6Ky0sHyIhIiUkLzAvQ0E/S0hGTEpIS0hHR0VDPj08MjQ0JyopISQkJCYmKiwrLjAvKiwrIycmHSEgJCYlPTs5S0hGS0hGSkdFSUZEQkE/PDs6MDEwJygoHSAfGx8eIycmLjAvLjAwIycmJykoQD48S0hGS0hGS0hGS0hGS0hGSUZEQkA+Ojk4LzAuJigoIycmLTAvMjQzMDEwNjY0SEVDS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFRkNCPz08Ojo4Ojo4Ozs5QD89RUNBS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGSkdFSUZESEZESEZESUdFSkdFS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hGS0hG"],"thumb":"data:image/webp;base64,UklGRtYEAABXRUJQVlA4WAoAAAAgAAAARQAASwAASUNDUMgBAAAAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADZWUDgg6AIAANAPAJ0BKkYATAA+KRKHQqGhCj22jgwBQlpAM30f4mhAtt/sZIiBOXmGXvDZuAB9P0sJkJrJat/+JKDkqJZpT7V/bSQbl1kZCTopZz1eMXdgU97x9FzIGNrHGTgJhE3thaR8z10m7T0hT3ikroRzUB1nDQWaKqbHnTOylVD16sxzoVDrCWzbAAD+/zvuNugqVgJ3X4ikUqjhWbvXEzc3PcxKedolsN9DDaPn8yGbeBQRdeXt8+YT8TvCK+SoQ29AO0rPik5A+/IaBBgGDLxtkzRT7eF70/gYyJf/bZeEsr+13yqa0LF/FlkvKalOdTkIB+cL0mLzS+NA5ooKQPx4REJP8/8uqLt3+x+r6z95W/luU8k78pRXJJFD/Su5UhkVqq6nsIqc86MNqT6FN6DebFLzuz5i3If57BzFUyMk1OLg6Uz+OflJZh5LdZhUcRFNN7Mq5S4JCCWYLZZBqz5J38x1HyT3z8sCmX64syszVByMh9Ut7j1/+yovVoTvJUQayO109PhTkh5g8+zm4b+VNs/PodFPDaPtd67iofnRRIuj25l9y/5b4lxBNE/MOQznqvavpXEMQ7hGkcKPhzOWl8z7HSz3R3sWHVyKDSofVDW1jzX6MkqkZdTMsCkyGnuXk7aJHIFYwMp8ERHn62IzZaDS3tnqQspUGXqIOyK3wsncDDaGmQJKXpYw4C/E3eWRWeBHvhNGow1lmPPYagjZ+R6UeBOng0/J6R31dmKkhx7fOa5LSnrVBUuUaqAFsl80REQWsiPSJBy6BKfgfx2PBPLLMO088z62I+HGhvUaR9NmADKBfSOItaImrhubgUJ01JYVMFs+XRs3qh0IGBr+MFB84ymUpMj/eBHvEROjPKkzPHcJUQBSwjK7rnPeXDS6Sz7V21+DATs467X3ASXVT6NhVuQj2C7itgi+P27O/qEsAdt4zevGPVm4h3FpDCV3M9GY4+S7J6wKPWGOLLP8rmG7SjCh4AAAAA==","tw":70}}};</script>
+<script>
+"use strict";
+/* ================= basics ================= */
+const KEY='rustShopFinder.v1';           // storage key kept from v1; the data inside says which version it is
+let S=null;                               // all saved state
+let pending=[];                           // scans waiting for review
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+const uid=()=>Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
+const fmt=n=>n==null||isNaN(n)?'—':Number(n).toLocaleString('en-US');   // 1,000 style thousands separators
+
+/* ================= data model (v2) =================
+   icons   learned item icons (unchanged from v1)
+   pins    map spots: {x,y in 0..1 or null if not placed, nick, names[] seen there, genericSeen, total}
+   vendors one entry per vending machine, with its own id: {name (as shown in game), nick, pin, items[], seen, empty}
+   history per vendor, one entry each time a listing's bundle size or price changes: {k:'icon>costIcon', t, qty, cost}
+*/
+const OD='https://content.rustmaps.com/maps/289/f654f5687cd648eb9408242996a83051/';
+const DEFAULT_MAP={size:4250,icons:OD+'map_icons.png',raw:OD+'map_raw_normalized.png',view:'icons',grid:false,iconsUp:false,rawUp:false};
+function blank(){return {v:2,server:{name:'Orange Dream',since:Date.now()},map:{...DEFAULT_MAP},icons:{},pins:{},vendors:{},history:{},notice:null};}
+function fromSeed(){const b=blank();if(window.SEED&&window.SEED.icons)b.icons=JSON.parse(JSON.stringify(window.SEED.icons));return b;}
+
+function recordHistory(st,vid,items,t){
+  const H=st.history[vid]||(st.history[vid]=[]);
+  for(const it of items||[]){
+    if(!it.icon||!it.costIcon||it.qty==null||it.cost==null)continue;
+    const k=it.icon+'>'+it.costIcon;let last=null;
+    for(let i=H.length-1;i>=0;i--)if(H[i].k===k){last=H[i];break;}
+    // a rescan of an unchanged listing is not a new market price
+    if(!last||last.qty!==it.qty||last.cost!==it.cost)H.push({k,t,qty:it.qty,cost:it.cost});
+  }
+  if(H.length>400)H.splice(0,H.length-400);
+}
+
+const GENERIC=new Set(['ashop','shop','vendingmachine']);
+const baseName=n=>String(n||'').replace(/\s*\(\d+\)\s*$/,'').trim();
+const isGeneric=n=>GENERIC.has(norm(baseName(n)));
+
+function migrate(d){
+  if(!d||typeof d!=='object')return null;
+  if(d.v===2){d.map={...DEFAULT_MAP,...(d.map||{})};d.pins=d.pins||{};d.vendors=d.vendors||{};d.history=d.history||{};d.icons=d.icons||{};d.server=d.server||{name:'',since:Date.now()};return d;}
+  if(d.v!==1)return null;
+  const n=blank();n.server={name:'',since:Date.now()};n.icons=d.icons||{};
+  const pinByLk={};
+  for(const [lk,L] of Object.entries(d.locs||{})){
+    if(lk==='_none')continue;
+    const id=uid();pinByLk[lk]=id;
+    n.pins[id]={x:null,y:null,nick:L.label||'',names:(L.names||[]).filter(x=>!isGeneric(x)),genericSeen:L.genericSeen||0,total:L.total||null,created:Date.now()};
+  }
+  for(const [k,s] of Object.entries(d.shops||{})){
+    const lk=k.split('|')[0];let pid=pinByLk[lk]||null;
+    if(!pid&&lk!=='_none'&&s.loc){pid=uid();pinByLk[lk]=pid;n.pins[pid]={x:null,y:null,nick:s.loc,names:[],genericSeen:0,total:null,created:Date.now()};}
+    const vid=uid();const t=s.seen||Date.now();
+    n.vendors[vid]={name:s.name||'Unnamed shop',nick:'',pin:pid,items:s.items||[],seen:t,empty:!!s.empty,created:t};
+    recordHistory(n,vid,s.items,t);
+  }
+  if(Object.keys(n.vendors).length)n.notice='migrated';
+  return n;
+}
+function load(){
+  let raw=null;try{raw=localStorage.getItem(KEY);}catch(e){}
+  if(raw){try{const d=JSON.parse(raw);
+    if(d&&d.v===1){try{localStorage.setItem(KEY+'.v1backup',raw);}catch(e){}}   // untouched copy of the old data
+    const m=migrate(d);if(m){S=m;save();return;}}catch(e){console.warn(e);}}
+  S=fromSeed();
+}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){console.warn('save failed',e);}}
+
+/* undo: keep the last few states so a slip can be taken back */
+let undoStack=[];
+try{undoStack=JSON.parse(localStorage.getItem(KEY+'.undo')||'[]').filter(u=>{try{return JSON.parse(u.state).v===2;}catch(e){return false;}});}catch(e){undoStack=[];}
+function storeUndo(){for(;;){try{localStorage.setItem(KEY+'.undo',JSON.stringify(undoStack));return;}catch(e){if(undoStack.length<=1)return;undoStack.shift();}}}
+function pushUndo(label){undoStack.push({label,state:JSON.stringify(S)});if(undoStack.length>12)undoStack.shift();storeUndo();}
+function undo(){const u=undoStack.pop();if(!u)return;S=JSON.parse(u.state);storeUndo();save();renderAll();Map_.refresh();}
+
+/* uploaded map pictures are too big for localStorage, so they go in IndexedDB */
+const IDB={p:null,
+  open(){if(this.p)return this.p;this.p=new Promise(res=>{try{const r=indexedDB.open('rustShopFinder',1);r.onupgradeneeded=()=>r.result.createObjectStore('files');r.onsuccess=()=>res(r.result);r.onerror=()=>res(null);}catch(e){res(null);}});return this.p;},
+  async get(k){const db=await this.open();if(!db)return null;return new Promise(res=>{try{const q=db.transaction('files').objectStore('files').get(k);q.onsuccess=()=>res(q.result||null);q.onerror=()=>res(null);}catch(e){res(null);}});},
+  async set(k,v){const db=await this.open();if(!db)return false;return new Promise(res=>{try{const tx=db.transaction('files','readwrite');tx.objectStore('files').put(v,k);tx.oncomplete=()=>res(true);tx.onerror=()=>res(false);}catch(e){res(false);}});}
+};
+
+/* ================= pins, grid, vendors ================= */
+const CELL=146.3;   // Rust map grid square size in metres
+const gridCells=()=>Math.max(1,Math.floor((S.map.size||4250)/CELL));
+function colName(i){let s='';i++;while(i>0){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26);}return s;}
+function gridOf(x,y){if(x==null||y==null)return '';const n=gridCells();return colName(Math.max(0,Math.min(n-1,Math.floor(x*n))))+Math.max(0,Math.min(n-1,Math.floor(y*n)));}
+const pinGrid=p=>p?gridOf(p.x,p.y):'';
+function pinLabel(pid){const p=S.pins[pid];if(!p)return 'No pin';const g=pinGrid(p);return p.nick?(g?`${p.nick} · ${g}`:`${p.nick} · not placed`):(g||'Unnamed pin · not placed');}
+const vName=v=>v?(v.nick||v.name||'Unnamed shop'):'';
+const vendorsAt=pid=>Object.entries(S.vendors).filter(([,v])=>v.pin===pid);
+function newPin(nick,x=null,y=null){const id=uid();S.pins[id]={x,y,nick:nick||'',names:[],genericSeen:0,total:null,created:Date.now()};return id;}
+
+/* ================= fingerprints ================= */
+const FP=16;
+function b64(u8){let s='';for(let i=0;i<u8.length;i++)s+=String.fromCharCode(u8[i]);return btoa(s);}
+function unb64(s){const b=atob(s);const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}
+const fpCache=new Map();
+function fpArr(s){let a=fpCache.get(s);if(!a){a=unb64(s);fpCache.set(s,a);}return a;}
+function fpDist(a,b){if(typeof a==='string')a=fpArr(a);if(typeof b==='string')b=fpArr(b);if(a.length!==b.length)return 99;
+  // average difference over cells where either icon has content (background cells are identical and would dilute it)
+  let d=0,n=0;for(let i=0;i<a.length;i+=3){const fa=Math.abs(a[i]-75)+Math.abs(a[i+1]-72)+Math.abs(a[i+2]-70)>24,fb=Math.abs(b[i]-75)+Math.abs(b[i+1]-72)+Math.abs(b[i+2]-70)>24;
+    if(fa||fb){d+=Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2]);n++;}}
+  return n?d/(n*3):0;}
+const AUTO=3.0, GUESS=6.5;
+function matchIcon(fp){
+  let best=null,bd=1e9;
+  for(const [id,ic] of Object.entries(S.icons)){for(const s of ic.samples){const d=fpDist(fp,s);if(d<bd){bd=d;best=id;}}}
+  if(best&&bd<=AUTO) return {id:best,conf:'ok',d:bd};
+  if(best&&bd<=GUESS) return {id:best,conf:'guess',d:bd};
+  return {id:null,conf:'new',d:bd};
+}
+function iconName(id){const ic=S.icons[id];return ic?ic.name:'';}
+function iconIdByName(name){const n=norm(name);if(!n)return null;for(const [id,ic] of Object.entries(S.icons))if(norm(ic.name)===n)return id;return null;}
+
+/* ================= image analysis ================= */
+function isRowPx(r,g,b){
+  return (Math.abs(r-60)<=11&&Math.abs(g-55)<=11&&Math.abs(b-51)<=11) || (Math.abs(r-69)<=12&&Math.abs(g-40)<=12&&Math.abs(b-32)<=12);
+}
+function analyzePixels(img){
+  const {width:W,height:H,data:D}=img;
+  const px=(x,y)=>{const i=(y*W+x)*4;return [D[i],D[i+1],D[i+2]];};
+  // 1. count row-coloured pixels per line
+  const cnt=new Int32Array(H);
+  for(let y=0;y<H;y++){let c=0,o=y*W*4;for(let x=0;x<W;x++,o+=4){if(isRowPx(D[o],D[o+1],D[o+2]))c++;}cnt[y]=c;}
+  const thr=Math.max(40,0.1*W);
+  let bands=[],inb=false,y0=0;
+  for(let y=0;y<=H;y++){const on=y<H&&cnt[y]>thr;if(on&&!inb){inb=true;y0=y;}if(!on&&inb){inb=false;bands.push({y0,y1:y-1});}}
+  // x extent from the longest run inside each band
+  for(const b of bands){
+    let best=[0,0,0];
+    for(let y=b.y0;y<=b.y1;y++){let s=-1;for(let x=0;x<=W;x++){const on=x<W&&(()=>{const o=(y*W+x)*4;return isRowPx(D[o],D[o+1],D[o+2]);})();if(on&&s<0)s=x;if(!on&&s>=0){if(x-s>best[0])best=[x-s,s,x-1];s=-1;}}}
+    b.x0=best[1];b.x1=best[2];b.h=b.y1-b.y0+1;b.w=b.x1-b.x0+1;
+  }
+  bands=bands.filter(b=>b.h>=10&&b.w/b.h>=6&&b.w/b.h<=11.5);
+  if(!bands.length) return {rows:[],headers:[],title:null,reason:'No item rows found in this screenshot. If the shop says "This vendor has no listings", there is nothing to read: open the Shops tab and press "No listings" next to its name instead. Otherwise expand a shop so its items show and screenshot again.'};
+  const med=a=>{const s=[...a].sort((p,q)=>p-q);return s[Math.floor(s.length/2)];};
+  const h=med(bands.map(b=>b.h)), x0=med(bands.map(b=>b.x0)), x1=med(bands.map(b=>b.x1));
+  let rows=bands.filter(b=>Math.abs(b.h-h)<=0.15*h&&Math.abs(b.x0-x0)<=0.15*h);
+  rows.forEach(r=>{r.x0=x0;r.x1=x1;let red=0,n=0;for(let x=Math.round(x0+5.2*h);x<x1-0.2*h;x+=3){const [R,G,B]=px(x,Math.round(r.y0+0.12*h));n++;if(R-G>18)red++;}r.sold=red>n*0.5;
+    // "This vendor has no listings." sits in a row-coloured box with red text where the SELLING column would be
+    let rt=0;if(!r.sold)for(let y=Math.round(r.y0+0.3*h);y<r.y0+0.7*h;y+=2)for(let x=Math.round(x0+0.95*h);x<x0+2.5*h;x+=2){const [R,G,B]=px(x,y);if(R>140&&R-G>55&&R-B>55)rt++;}
+    r.empty=rt>=12;});
+  const inRow=y=>rows.some(r=>y>=r.y0-2&&y<=r.y1+2);
+  // 2. green drone icons (shop headers) and lime title icon, in a narrow column at the panel's left
+  const cx0=Math.max(0,Math.round(x0-0.08*h)), cx1=Math.min(W-1,Math.round(x0+0.45*h));
+  const tx0=Math.max(0,Math.round(x0-0.75*h)), tx1=Math.min(W-1,Math.round(x0+0.3*h));
+  const ax0=Math.max(0,Math.round(x0-0.05*h)), ax1=Math.min(W-1,Math.round(x0+4.5*h));
+  const lines=[],limeLines=[],textLines=[];
+  for(let y=0;y<H;y++){
+    if(!inRow(y)){let g=0;for(let x=cx0;x<=cx1;x++){const [R,G,B]=px(x,y);if(G-R>=20&&G-B>=45&&G>=95)g++;}if(g>=2)lines.push(y);
+      let t=0;for(let x=ax0;x<=ax1;x++){const [R,G,B]=px(x,y);if(Math.max(R,G,B)>170&&G-R<30&&R-G<50)t++;}if(t>=2)textLines.push(y);}
+    let l=0;for(let x=tx0;x<=tx1;x++){const [R,G,B]=px(x,y);if(G>165&&R>95&&R<200&&B<95&&G-R>30)l++;}if(l>=Math.max(3,0.15*h))limeLines.push(y);
+  }
+  const blobs=(ys,gap)=>{const out=[];for(const y of ys){const b=out[out.length-1];if(b&&y-b.y1<=gap)b.y1=y;else out.push({y0:y,y1:y});}return out;};
+  // shop names are light text on the dark bar; other HUD text (team list) is green
+  const nameInk=cy=>{let br=0,gr=0;for(let y=Math.round(cy-0.15*h);y<=cy+0.15*h;y+=2)for(let x=Math.round(x0+0.6*h);x<x0+4*h&&x<W;x+=2){const [R,G,B]=px(x,y);if(Math.max(R,G,B)>170){br++;if(G-R>30&&G-B>30)gr++;}}return br>=8&&gr<br*0.3;};
+  const darkLine=y=>{if(y<0||y>=H)return false;const v=[];for(let x=Math.round(x0+0.5*h);x<x1-0.5*h;x+=4){const [R,G,B]=px(x,Math.round(y));v.push(Math.max(R,G,B));}return med(v)<72;};
+  // shop headers = a line of light text on the dark bar (some shops have a green drone icon before the name, some don't)
+  const drones=blobs(lines,Math.max(2,0.08*h)).filter(b=>b.y1-b.y0+1>=0.15*h&&b.y1-b.y0+1<=0.55*h);
+  let headers=blobs(textLines,Math.max(2,0.06*h)).map(b=>({cy:(b.y0+b.y1)/2,hb:b.y1-b.y0+1}))
+    .filter(b=>b.hb>=0.12*h&&b.hb<=0.42*h&&darkLine(b.cy-0.33*h)&&darkLine(b.cy+0.33*h))
+    .map(b=>({...b,drone:drones.some(d=>Math.abs((d.y0+d.y1)/2-b.cy)<0.25*h)}));
+  let title=null;
+  const lb=blobs(limeLines,3).filter(b=>b.y1-b.y0+1>=0.5*h).sort((a,b)=>(b.y1-b.y0)-(a.y1-a.y0))[0];
+  if(lb) title={cy:(lb.y0+lb.y1)/2};
+  // 3. keep only headers that chain to the rows (drops unrelated green UI elsewhere)
+  const els=[...rows.map(r=>({t:'r',a:r.y0,b:r.y1,r})),...headers.map(hd=>({t:'h',a:hd.cy-0.45*h,b:hd.cy+0.45*h,hd}))].sort((p,q)=>p.a-q.a);
+  const firstRow=els.findIndex(e=>e.t==='r');
+  const keep=new Set();
+  let i=firstRow;while(i>0&&els[i].a-els[i-1].b<=1.1*h){i--;}
+  let j=firstRow;while(j<els.length-1&&els[j+1].a-els[j].b<=1.1*h){j++;}
+  for(let k=i;k<=j;k++)keep.add(els[k]);
+  headers=els.filter(e=>e.t==='h'&&keep.has(e)).map(e=>e.hd);
+  rows=els.filter(e=>e.t==='r'&&keep.has(e)).map(e=>e.r);
+  if(title&&headers.length&&title.cy>headers[0].cy) title=null;
+  // owner header for each row
+  rows.forEach(r=>{let o=null;for(const hd of headers)if(hd.cy<r.y0)o=hd;r.owner=o;});
+  headers.forEach(hd=>hd.rows=rows.filter(r=>r.owner===hd));
+  return {W,H,h,x0,x1,rows,headers,title};
+}
+
+/* crops */
+function cropCanvas(src,x,y,w,h,scale=1){
+  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(w*scale));c.height=Math.max(1,Math.round(h*scale));
+  const g=c.getContext('2d');g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';g.drawImage(src,x,y,w,h,0,0,c.width,c.height);return c;
+}
+function textCanvas(src,x,y,w,h,scale,thr){
+  const c=cropCanvas(src,x,y,w,h,scale);const g=c.getContext('2d');const im=g.getImageData(0,0,c.width,c.height);const d=im.data;
+  for(let i=0;i<d.length;i+=4){const m=Math.max(d[i],d[i+1],d[i+2]);const v=m>thr?0:255;d[i]=d[i+1]=d[i+2]=v;d[i+3]=255;}
+  g.putImageData(im,0,0);
+  // pad with white so glyphs don't touch the edge
+  const p=document.createElement('canvas');const pad=Math.round(c.height*0.25);p.width=c.width+pad*2;p.height=c.height+pad*2;const pg=p.getContext('2d');pg.fillStyle='#fff';pg.fillRect(0,0,p.width,p.height);pg.drawImage(c,pad,pad);return p;
+}
+function iconData(img,src,bx0,by0,bx1,by1){
+  // fingerprint: box-average the inner icon (skips the condition bar on the left edge)
+  const w=bx1-bx0,hh=by1-by0;
+  const ix0=bx0+0.15*w,ix1=bx1-0.05*w,iy0=by0+0.05*hh,iy1=by1-0.05*hh;
+  const {width:W,data:D}=img;const out=new Uint8Array(FP*FP*3);
+  // box background differs between normal (grey) and sold-out (red) rows: estimate it from the crop border and neutralise it
+  const bs=[[],[],[]];const pushB=(x,y)=>{const o=(Math.round(y)*W+Math.round(x))*4;bs[0].push(D[o]);bs[1].push(D[o+1]);bs[2].push(D[o+2]);};
+  for(let x=ix0;x<ix1;x+=2){pushB(x,iy0);pushB(x,iy1-1);}for(let y=iy0;y<iy1;y+=2){pushB(ix1-1,y);}
+  const bg=bs.map(a=>a.sort((p,q)=>p-q)[a.length>>1]);
+  for(let gy=0;gy<FP;gy++)for(let gx=0;gx<FP;gx++){
+    // overlapping windows (2x cell size) so sub-pixel shifts between screenshots barely change the result
+    const cw=(ix1-ix0)/FP,ch=(iy1-iy0)/FP,cx=ix0+cw*(gx+.5),cy=iy0+ch*(gy+.5);
+    const xa=Math.max(Math.floor(ix0),Math.floor(cx-cw)),xb=Math.min(Math.ceil(ix1),Math.max(xa+1,Math.ceil(cx+cw)));
+    const ya=Math.max(Math.floor(iy0),Math.floor(cy-ch)),yb=Math.min(Math.ceil(iy1),Math.max(ya+1,Math.ceil(cy+ch)));
+    let r=0,g=0,b=0,n=0;for(let y=ya;y<yb;y++)for(let x=xa;x<xb;x++){const o=(y*W+x)*4;let R=D[o],G=D[o+1],B=D[o+2];
+      if(Math.abs(R-bg[0])<20&&Math.abs(G-bg[1])<20&&Math.abs(B-bg[2])<20){R=75;G=72;B=70;}
+      r+=R;g+=G;b+=B;n++;}
+    r=Math.max(0,Math.min(255,r/n*1));g=Math.max(0,Math.min(255,g/n));b=Math.max(0,Math.min(255,b/n));n=1;
+    const k=(gy*FP+gx)*3;out[k]=r/n;out[k+1]=g/n;out[k+2]=b/n;
+  }
+  // keep the icon at the screenshot's own resolution (capped) so it stays sharp
+  const t=cropCanvas(src,bx0,by0,w,hh,Math.min(1,96/Math.max(w,hh)));
+  let url=t.toDataURL('image/webp',0.92);if(!url.startsWith('data:image/webp'))url=t.toDataURL('image/png');
+  return {fp:b64(out),thumb:url,tw:t.width};
+}
+
+/* ================= OCR ================= */
+let ocrPromise=null, ocrQueue=Promise.resolve();
+function setOcrState(t){$('#ocrState').textContent=t;}
+function getOcr(){
+  if(ocrPromise) return ocrPromise;
+  const timeout=new Promise((_,rej)=>setTimeout(()=>rej(new Error('reader took too long to start')),90000));
+  ocrPromise=Promise.race([timeout,(async()=>{
+    const ok=await window.__tessLoad; if(!ok||!window.Tesseract) throw new Error('reader script did not load');
+    setOcrState('Loading the text reader (first scan only)…');
+    const base=new URL('ocr/',location.href).href;
+    // language data ships with the page as base64 text and is handed to the reader directly
+    const resp=await fetch(base+'lang/eng-traineddata-gz.b64.txt'); if(!resp.ok) throw new Error('language data missing');
+    const bin=atob((await resp.text()).trim()); const data=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)data[i]=bin.charCodeAt(i);
+    const w=await Tesseract.createWorker([{code:'eng',data}],1,{workerPath:base+'worker.min.js',corePath:base+'core',workerBlobURL:false,cacheMethod:'none'});
+    await w.setParameters({tessedit_pageseg_mode:'7'});
+    setOcrState('Text reader ready.');
+    return w;
+  })()]).catch(e=>{console.error(e);setOcrState('The text reader could not load here, so names and numbers need typing in by hand. Icons still match automatically.');return null;});
+  return ocrPromise;
+}
+async function ocr(canvas,whitelist){
+  const w=await getOcr(); if(!w) return '';
+  const run=ocrQueue.then(async()=>{await w.setParameters({tessedit_char_whitelist:whitelist||''});const r=await w.recognize(canvas);return (r.data.text||'').trim();});
+  ocrQueue=run.catch(()=>{});
+  try{return await run;}catch(e){console.error(e);return '';}
+}
+const numOf=t=>{const m=String(t).replace(/[Oo]/g,'0').replace(/[Il|]/g,'1').match(/\d+/);return m?parseInt(m[0],10):null;};
+function cleanName(t){return String(t).replace(/[\r\n]+/g,' ').replace(/\s+/g,' ').replace(/^[^A-Za-z0-9'"(]+/,'').replace(/[^A-Za-z0-9)!'"?.]+$/,'').trim();}
+function lev(a,b){const m=a.length,n=b.length;if(!m)return n;if(!n)return m;let p=Array.from({length:n+1},(_,i)=>i);for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c;}return p[n];}
+
+/* ================= names ================= */
+function snapShopName(name){
+  if(isGeneric(name))return name;
+  const n=norm(name);if(!n)return name;let best=null,bd=99;
+  const all=new Set([...Object.values(S.vendors).map(v=>v.name),...Object.values(S.pins).flatMap(p=>p.names||[])]);
+  for(const c of all){const d=lev(n,norm(c));if(d<bd){bd=d;best=c;}}
+  return best&&bd<=Math.floor(n.length/8)?best:name;
+}
+function slotIconId(sl){if(sl.name)return iconIdByName(sl.name);const m=matchIcon(sl.fp);return m.conf==='ok'?m.id:null;}
+const sameSet=(a,b)=>a.size===b.size&&[...a].every(x=>b.has(x));
+
+/* ================= scanning ================= */
+async function scanFile(file){
+  const card={id:uid(),file:file.name||'pasted image',status:'reading',sections:[],others:[],pin:'',total:null,warn:[]};
+  pending.push(card);renderCards();updateBadges();
+  try{
+    const bmp=await createImageBitmap(file);
+    const cv=document.createElement('canvas');cv.width=bmp.width;cv.height=bmp.height;const g=cv.getContext('2d',{willReadFrequently:true});g.drawImage(bmp,0,0);
+    const img=g.getImageData(0,0,cv.width,cv.height);
+    const A=analyzePixels(img);
+    if(!A.rows.length){card.status='error';card.error=A.reason;renderCards();return;}
+    const {h,x0,x1}=A;
+    const top=Math.max(0,(A.title?A.title.cy-0.6*h:(A.headers[0]?A.headers[0].cy-0.6*h:A.rows[0].y0-0.3*h)));
+    const bot=Math.min(cv.height,A.rows[A.rows.length-1].y1+0.3*h);
+    const left=Math.max(0,x0-0.8*h),right=Math.min(cv.width,x1+0.3*h);
+    card.preview=cropCanvas(cv,left,top,right-left,bot-top,Math.min(1,440/(right-left))).toDataURL('image/jpeg',0.8);
+    card.status='ocr';renderCards();
+    if(A.title){
+      const t=await ocr(textCanvas(cv,x0+0.9*h,A.title.cy-0.4*h,4.6*h,0.8*h,1.5,140),'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ ');
+      const n=numOf(t);card.total=/VENDOR/i.test(t)&&n?n:(/STORE/i.test(t)?1:null);card.titleText=t;
+    }
+    const nameOf=async hd=>{const nx=hd.drone?x0+0.6*h:x0-0.05*h;return cleanName(await ocr(textCanvas(cv,nx,hd.cy-0.3*h,x0+6.0*h-nx,0.6*h,2,140)));};
+    const seenN={};
+    for(const hd of A.headers){let n=snapShopName(await nameOf(hd));const k=norm(n);if(k){seenN[k]=(seenN[k]||0)+1;if(seenN[k]>1)n=n+' ('+seenN[k]+')';}hd.name=n;}
+    card.others=A.headers.filter(hd=>!hd.rows.length).map(hd=>hd.name).filter(Boolean);
+    const groups=A.headers.filter(hd=>hd.rows.length).map(hd=>({name:hd.name,rows:hd.rows}));
+    const orphan=A.rows.filter(r=>!r.owner);
+    if(orphan.length){groups.unshift({name:'',rows:orphan});card.warn.push('A shop name was scrolled out of view. Type it in.');}
+    for(const gp of groups){
+      const sec={name:gp.name,rows:[],empty:gp.rows.every(r=>r.empty),target:'new',why:'',userTarget:false,nick:''};
+      for(const r of gp.rows){
+        if(r.empty)continue;
+        const y0=r.y0;
+        const sell=iconData(img,cv,x0+0.10*h,y0+0.07*h,x0+0.90*h,y0+0.93*h);
+        const cost=iconData(img,cv,x0+2.58*h,y0+0.07*h,x0+3.38*h,y0+0.93*h);
+        const qtyT=await ocr(textCanvas(cv,x0+0.98*h,y0+0.45*h,1.5*h,0.47*h,3,150),'0123456789');
+        const costT=await ocr(textCanvas(cv,x0+3.48*h,y0+0.45*h,1.5*h,0.47*h,3,150),'0123456789');
+        let stockT='';if(!r.sold)stockT=await ocr(textCanvas(cv,x0+5.2*h,y0+0.25*h,(x1-0.15*h)-(x0+5.2*h),0.5*h,2,150),'0123456789INSTOCKSLDU ');
+        const row={sell:slotFrom(sell),cost:slotFrom(cost),qty:numOf(qtyT),costQty:numOf(costT),sold:r.sold||/SOLD/i.test(stockT),stock:null};
+        row.stock=row.sold?0:numOf(stockT);
+        sec.rows.push(row);
+      }
+      card.sections.push(sec);
+    }
+    card.pin=guessPin(card);
+    assignTargets(card);
+    card.status='review';
+  }catch(e){console.error(e);card.status='error';card.error='Could not read this image ('+e.message+').';}
+  renderCards();updateBadges();
+}
+function slotFrom(d){const m=matchIcon(d.fp);return {id:uid(),fp:d.fp,thumb:d.thumb,tw:d.tw,name:m.id?iconName(m.id):'',conf:m.conf,from:null};}
+const realNames=c=>[...c.sections.map(s=>s.name),...c.others].filter(n=>n&&!isGeneric(n)).map(norm);
+function guessPin(card){
+  const names=realNames(card);
+  if(names.length){
+    for(const [pid,p] of Object.entries(S.pins))if((p.names||[]).some(n=>names.includes(norm(n))))return pid;
+    for(const v of Object.values(S.vendors))if(v.pin&&S.pins[v.pin]&&!isGeneric(v.name)&&names.includes(norm(v.name)))return v.pin;
+  }
+  // a screenshot of the same cluster earlier in this batch
+  const prev=pending.slice(0,pending.indexOf(card)).filter(p=>p.status==='review'&&p.pin);
+  for(const p of [...prev].reverse()){if(realNames(p).some(n=>names.includes(n)))return p.pin;}
+  const last=prev[prev.length-1];
+  if(last&&card.total>1&&last.total===card.total)return last.pin;
+  return '';
+}
+// Which vendor a section updates. A suggestion is only made when it is clear-cut, and it is always shown for you to confirm.
+function suggestVendor(pid,sec,taken){
+  if(!pid||!S.pins[pid])return {t:'new',why:''};
+  const here=vendorsAt(pid).filter(([id])=>!taken.has(id));
+  if(sec.name&&!isGeneric(sec.name)){const m=here.find(([,v])=>norm(v.name)===norm(sec.name));return m?{t:m[0],why:'Same shop name as before.'}:{t:'new',why:''};}
+  const gen=here.filter(([,v])=>isGeneric(v.name));
+  if(!sec.rows.length){const c=gen.filter(([,v])=>!v.items.length);return c.length===1?{t:c[0][0],why:'The only empty "A Shop" here.'}:{t:'new',why:''};}
+  const ids=sec.rows.map(r=>slotIconId(r.sell));
+  if(ids.some(x=>!x))return {t:'new',why:''};
+  const mine=new Set(ids);
+  const c=gen.filter(([,v])=>v.items.length&&sameSet(new Set(v.items.map(i=>i.icon)),mine));
+  return c.length===1?{t:c[0][0],why:'Sells exactly the same items as this one did last time.'}:{t:'new',why:''};
+}
+function assignTargets(card){
+  const taken=new Set(card.sections.filter(s=>s.userTarget&&s.target!=='new').map(s=>s.target));
+  for(const sec of card.sections){
+    if(sec.userTarget)continue;
+    const r=suggestVendor(card.pin,sec,taken);sec.target=r.t;sec.why=r.why;
+    if(r.t!=='new')taken.add(r.t);
+  }
+}
+
+/* review edits: naming an icon applies to every matching icon still waiting.
+   Only the box you typed in counts as yours. Copies it fills in elsewhere stay linked to it,
+   so retyping the first box corrects them too, and typing in a filled-in box takes it over. */
+const PROP=2.2;
+function applyName(fp,name,src){
+  src.name=name;src.conf=name?'user':'new';src.from=null;
+  for(const c of pending){if(c.status!=='review')continue;for(const s of c.sections)for(const r of s.rows)for(const k of ['sell','cost']){
+    const sl=r[k];if(sl===src||sl.conf==='user')continue;
+    if(sl.from===src.id||fpDist(sl.fp,fp)<=PROP){sl.name=name;sl.conf=name?'auto':'new';sl.from=name?src.id:null;}
+  }}
+}
+// numbers worth a second look before saving
+function rowFlags(row,sec){
+  const f={};
+  if(!row.qty)f.qty='Quantity missing or zero.';
+  if(!row.costQty)f.costQty='Price missing or zero.';
+  if(!row.sold&&row.stock==null)f.stock='Stock not read.';
+  if(!row.sold&&row.stock===0)f.stock='Zero stock but not marked sold out.';
+  const V=sec.target!=='new'?S.vendors[sec.target]:null;
+  if(V&&row.qty&&row.costQty){
+    const si=slotIconId(row.sell),ci=slotIconId(row.cost);
+    const old=V.items.find(i=>i.icon===si&&i.costIcon===ci);
+    if(old&&old.qty&&old.cost){const was=old.cost/old.qty,now=row.costQty/row.qty;if(now>was*3||now<was/3)f.costQty=`Very different from last time (${fmt(old.qty)} for ${fmt(old.cost)}).`;}
+  }
+  return f;
+}
+
+function saveCard(card,noUndo){
+  if(card.status!=='review')return;
+  if(!noUndo)pushUndo('save '+((card.sections[0]&&card.sections[0].name)||'shop'));
+  const now=Date.now();
+  const pid=S.pins[card.pin]?card.pin:null;
+  if(pid){
+    const P=S.pins[pid];if(card.total)P.total=card.total;
+    const add=n=>{if(n&&!isGeneric(n)&&!P.names.some(x=>norm(x)===norm(n)))P.names.push(n);};
+    card.others.forEach(add);card.sections.forEach(s=>add(s.name));
+    P.genericSeen=Math.max(P.genericSeen||0,[...card.sections.map(s=>s.name),...card.others].filter(isGeneric).length);
+  }
+  const used=new Set();
+  for(const sec of card.sections){
+    let name=(sec.name||'').trim()||'Unnamed shop';
+    if(isGeneric(name))name=baseName(name);   // "A Shop (2)" is only our on-screen label; the game calls it "A Shop"
+    const items=sec.rows.map(r=>({icon:learn(r.sell),qty:r.qty??1,costIcon:learn(r.cost),cost:r.costQty??0,stock:r.sold?0:(r.stock??0),sold:!!r.sold}));
+    let vid=sec.target!=='new'&&S.vendors[sec.target]&&!used.has(sec.target)?sec.target:null;
+    if(!vid){vid=uid();S.vendors[vid]={name,nick:'',pin:pid,items:[],seen:now,created:now};}
+    used.add(vid);
+    const V=S.vendors[vid];
+    V.name=name;if(sec.nick)V.nick=sec.nick;if(pid)V.pin=pid;
+    V.items=items;V.seen=now;V.empty=!!sec.empty&&!items.length;
+    recordHistory(S,vid,items,now);
+  }
+  card.status='saved';
+  save();
+}
+function learn(slot){
+  const name=(slot.name||'').trim();
+  let id=name?iconIdByName(name):null;
+  if(!id){const m=matchIcon(slot.fp);if(m.conf==='ok'&&!name&&m.id)id=m.id;}
+  if(!id){id=uid();S.icons[id]={name,samples:[slot.fp],thumb:slot.thumb,tw:slot.tw||0};return id;}
+  const ic=S.icons[id];
+  if(name&&!ic.name)ic.name=name;
+  if((slot.tw||0)>(ic.tw||48)){ic.thumb=slot.thumb;ic.tw=slot.tw;}
+  const md=Math.min(...ic.samples.map(s=>fpDist(s,slot.fp)));
+  if(md>1.2&&ic.samples.length<5)ic.samples.push(slot.fp);
+  return id;
+}
+
+/* ================= map ================= */
+const Map_={s:1,tx:0,ty:0,fit:1,fitted:false,sel:null,hl:null,mode:null,moving:null,srcKey:'',_url:null,
+  vp(){return $('#mapview').getBoundingClientRect();},
+  fitView(){const r=this.vp();if(!r.width)return;const s=Math.min(r.width,r.height)/1000;this.fit=s;this.s=s;this.tx=(r.width-1000*s)/2;this.ty=(r.height-1000*s)/2;this.fitted=true;this.apply();},
+  apply(){const el=$('#mapinner');el.style.transform=`translate(${this.tx}px,${this.ty}px) scale(${this.s})`;el.style.setProperty('--inv',1/this.s);el.classList.toggle('labels',this.s>this.fit*2.2);},
+  zoomAt(cx,cy,f){const ns=Math.max(this.fit*0.6,Math.min(this.fit*16,this.s*f));this.tx=cx-(cx-this.tx)*ns/this.s;this.ty=cy-(cy-this.ty)*ns/this.s;this.s=ns;this.apply();},
+  toWorld(cx,cy){return {x:(cx-this.tx)/this.s/1000,y:(cy-this.ty)/this.s/1000};},
+  centerOn(x,y,z){const r=this.vp();if(!this.fitted)this.fitView();if(z)this.s=Math.max(this.s,this.fit*z);this.tx=r.width/2-x*1000*this.s;this.ty=r.height/2-y*1000*this.s;this.apply();},
+  msg(t){const m=$('#mapMsg');m.hidden=!t;m.textContent=t||'';},
+  hint(){const h=$('#mapHint');const p=this.moving&&S.pins[this.moving];
+    h.hidden=!this.mode;h.textContent=this.mode==='add'?'Click the map where the shops are. Press Esc to cancel.':(p?`Click the new spot for ${pinLabel(this.moving)}. Press Esc to cancel.`:'');
+    $('#mapview').classList.toggle('placing',!!this.mode);$('#mAddPin').textContent=this.mode==='add'?'Cancel':'+ Add pin';},
+  async loadImage(){
+    const view=S.map.view==='raw'&&(S.map.raw||S.map.rawUp)?'raw':'icons';
+    let src='';
+    if(S.map[view+'Up']){const b=await IDB.get('map-'+view);if(b){if(this._url)URL.revokeObjectURL(this._url);this._url=URL.createObjectURL(b);src=this._url;}}
+    if(!src)src=S.map[view]||'';
+    const key=view+'|'+(S.map[view+'Up']?'upload':src);if(key===this.srcKey)return;this.srcKey=key;
+    const img=$('#mapimg');
+    if(!src){img.removeAttribute('src');this.msg('No map picture yet. Add a link or upload one in Map settings below.');return;}
+    img.onload=()=>this.msg('');
+    img.onerror=()=>{this.msg("The map picture didn't load. If you're using the Claude-hosted copy, download the PNG from rustmaps and upload it in Map settings below.");$('#mapSet').open=true;};
+    img.src=src;
+  },
+  renderGrid(){
+    const svg=$('#mapgrid');svg.toggleAttribute('hidden',!S.map.grid);if(!S.map.grid)return;
+    const n=gridCells(),c=1000/n;let o='';
+    for(let i=1;i<n;i++){o+=`<line x1="${i*c}" y1="0" x2="${i*c}" y2="1000"/><line x1="0" y1="${i*c}" x2="1000" y2="${i*c}"/>`;}
+    for(let r=0;r<n;r++)for(let k=0;k<n;k++)o+=`<text x="${k*c+1.5}" y="${r*c+6}">${colName(k)}${r}</text>`;
+    svg.innerHTML=o;
+  },
+  renderPins(){
+    $('#mappins').innerHTML=Object.entries(S.pins).filter(([,p])=>p.x!=null).map(([id,p])=>{
+      const n=vendorsAt(id).length;const lbl=pinLabel(id);
+      return `<div class="pin${id===this.sel?' sel':''}" style="left:${p.x*100}%;top:${p.y*100}%" data-pin="${id}"><button aria-label="${esc(lbl)}, ${n} vendor${n===1?'':'s'}" title="${esc(lbl)}"><svg viewBox="0 0 30 38" aria-hidden="true"><path class="body" d="M15 37C15 37 2 22.5 2 14a13 13 0 0 1 26 0c0 8.5-13 23-13 23z" fill="#8cc32a" stroke="#1c1916" stroke-width="2"/></svg><span class="n">${n||'·'}</span></button><span class="lbl">${esc(p.nick||pinGrid(p))}</span></div>`;}).join('');
+  },
+  renderSide(){
+    const side=$('#mapside');const p=this.sel&&S.pins[this.sel];
+    if(!p){
+      const unplaced=Object.entries(S.pins).filter(([,q])=>q.x==null);
+      const nopin=Object.values(S.vendors).filter(v=>!v.pin||!S.pins[v.pin]).length;
+      side.innerHTML=`<h3>Map</h3><p class="note" style="margin:0">Drag to move, scroll or use + and − to zoom. Click a pin to see its vendors. Use <b>+ Add pin</b> and click the map to mark a spot with shops.</p>
+        ${unplaced.length?`<div class="field"><span class="label">Not on the map yet</span>${unplaced.map(([id])=>`<div class="unplaced"><span>${esc(pinLabel(id))}</span><button class="btn small" data-act="placepin" data-pin="${id}">Place</button></div>`).join('')}</div>`:''}
+        ${nopin?`<p class="note" style="margin:0">${nopin} vendor${nopin===1?' has':'s have'} no pin. Set one on the Shops tab.</p>`:''}`;
+      return;
+    }
+    const vs=vendorsAt(this.sel).sort((a,b)=>vName(a[1]).localeCompare(vName(b[1])));
+    const g=pinGrid(p);
+    const opened=new Set(vs.map(([,v])=>norm(v.name)));
+    const unopened=(p.names||[]).filter(n=>!opened.has(norm(n)));
+    side.innerHTML=`<div class="inline" style="justify-content:space-between"><h3>${esc(p.nick||'Pin')}</h3><button class="btn small" data-act="closeside" aria-label="Close">×</button></div>
+      <div class="inline"><span class="gridbig">${g||'—'}</span><span class="note">${g?'grid square':'not placed on the map yet'}</span></div>
+      <div class="field"><label class="label" for="pinNick">Nickname</label><input type="text" id="pinNick" value="${esc(p.nick)}" placeholder="e.g. FG Market" data-f="pinnick" data-pin="${this.sel}"></div>
+      <div class="inline"><button class="btn small" data-act="placepin" data-pin="${this.sel}">${p.x==null?'Place on map':'Move pin'}</button><span class="confirm" data-delpin="${this.sel}"><button class="btn small danger" data-act="askdelpin">Delete pin</button></span></div>
+      <span class="label">Vendors here (${vs.length})</span>
+      ${vs.length?vs.map(([vid,v])=>vendorCard(vid,v)).join(''):'<p class="note" style="margin:0">No vendors yet. Scan screenshots on the Scan tab and choose this pin.</p>'}
+      ${unopened.length?`<div class="field"><span class="label">Seen here, not opened yet</span><div class="chips">${unopened.map(n=>`<span class="chip">${esc(n)}</span>`).join('')}</div></div>`:''}`;
+    if(this.hl){const el=side.querySelector(`[data-vcard="${this.hl}"]`);if(el)el.scrollIntoView({block:'nearest'});}
+  },
+  refresh(){
+    if(!$('#mapview'))return;
+    $('#mvIcons').setAttribute('aria-pressed',S.map.view!=='raw');$('#mvRaw').setAttribute('aria-pressed',S.map.view==='raw');
+    $('#mvRaw').disabled=!(S.map.raw||S.map.rawUp);$('#mGrid').checked=!!S.map.grid;
+    this.loadImage();this.renderGrid();this.renderPins();this.renderSide();this.hint();renderMapSettings();
+  },
+  focus(pid,vid){
+    this.sel=pid;this.hl=vid||null;showTab('map');this.refresh();
+    const p=S.pins[pid];if(p&&p.x!=null)requestAnimationFrame(()=>this.centerOn(p.x,p.y,3));
+  }
+};
+function listingRow(it){
+  const stk=it.sold||!it.stock?'<span class="pill sold">Sold out</span>':`${fmt(it.stock)} left`;
+  return `<div class="lrow"><span class="what">${icoImg(it.icon,'ico sm')}<span>${fmt(it.qty)} × ${nameHtml(it.icon)}</span></span><span class="for"><span class="note">for</span>${icoImg(it.costIcon,'ico sm')}${fmt(it.cost)} ${nameHtml(it.costIcon)}</span><span class="stk">${stk}</span></div>`;
+}
+function vendorCard(vid,v){
+  return `<div class="vcard${vid===Map_.hl?' hl':''}" data-vcard="${vid}"><div class="vhead"><span><span class="vname">${esc(vName(v))}</span>${v.nick?` <span class="vgame">in game: ${esc(v.name)}</span>`:''}</span>${seenPill(v.seen)}</div>
+    ${v.items.length?v.items.map(listingRow).join(''):'<span class="note">No listings.</span>'}</div>`;
+}
+function renderMapSettings(){
+  const set=(id,v)=>{const el=$(id);if(el&&document.activeElement!==el)el.value=v??'';};
+  set('#msSize',S.map.size);set('#msIcons',S.map.iconsUp?'':S.map.icons);set('#msRaw',S.map.rawUp?'':S.map.raw);
+  $('#msGridNote').textContent=`${gridCells()} grid squares across (A–${colName(gridCells()-1)}, 0–${gridCells()-1})`;
+  $('#msIconsNote').textContent=S.map.iconsUp?'Using your uploaded picture.':'';
+  $('#msRawNote').textContent=S.map.rawUp?'Using your uploaded picture.':'';
+}
+function initMap(){
+  const vp=$('#mapview');const pts=new Map();let drag=null,pinch=null;
+  const rel=e=>{const r=Map_.vp();return [e.clientX-r.left,e.clientY-r.top];};
+  vp.addEventListener('pointerdown',e=>{if(e.button>0)return;try{vp.setPointerCapture(e.pointerId);}catch(_){}pts.set(e.pointerId,[e.clientX,e.clientY]);
+    if(pts.size===1)drag={x:e.clientX,y:e.clientY,tx:Map_.tx,ty:Map_.ty,moved:false,target:e.target};
+    else if(pts.size===2){const [a,b]=[...pts.values()];pinch={d:Math.hypot(a[0]-b[0],a[1]-b[1]),s:Map_.s};drag=null;}});
+  vp.addEventListener('pointermove',e=>{if(!pts.has(e.pointerId))return;pts.set(e.pointerId,[e.clientX,e.clientY]);
+    if(pinch&&pts.size===2){const [a,b]=[...pts.values()];const d=Math.hypot(a[0]-b[0],a[1]-b[1]);const r=Map_.vp();Map_.zoomAt((a[0]+b[0])/2-r.left,(a[1]+b[1])/2-r.top,(pinch.s*d/pinch.d)/Map_.s);return;}
+    if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+    if(!drag.moved&&Math.hypot(dx,dy)>5){drag.moved=true;vp.classList.add('dragging');}
+    if(drag.moved){Map_.tx=drag.tx+dx;Map_.ty=drag.ty+dy;Map_.apply();}});
+  const end=e=>{pts.delete(e.pointerId);vp.classList.remove('dragging');if(pts.size<2)pinch=null;
+    if(drag&&!drag.moved&&e.type==='pointerup')mapClick(drag.target,...rel(e));drag=null;};
+  vp.addEventListener('pointerup',end);vp.addEventListener('pointercancel',end);
+  vp.addEventListener('wheel',e=>{e.preventDefault();const [x,y]=rel(e);Map_.zoomAt(x,y,e.deltaY<0?1.25:0.8);},{passive:false});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&Map_.mode){Map_.mode=null;Map_.moving=null;Map_.hint();}});
+  $('#mZoomIn').onclick=()=>{const r=Map_.vp();Map_.zoomAt(r.width/2,r.height/2,1.4);};
+  $('#mZoomOut').onclick=()=>{const r=Map_.vp();Map_.zoomAt(r.width/2,r.height/2,1/1.4);};
+  $('#mFit').onclick=()=>Map_.fitView();
+  $('#mAddPin').onclick=()=>{Map_.mode=Map_.mode==='add'?null:'add';Map_.moving=null;Map_.hint();};
+  $('#mvIcons').onclick=()=>{S.map.view='icons';save();Map_.refresh();};
+  $('#mvRaw').onclick=()=>{S.map.view='raw';save();Map_.refresh();};
+  $('#mGrid').onchange=e=>{S.map.grid=e.target.checked;save();Map_.renderGrid();};
+  window.addEventListener('resize',()=>{if(curTab==='map'&&!Map_.fitted)Map_.fitView();});
+  // map settings
+  $('#msSize').onchange=e=>{const v=parseInt(e.target.value,10);if(v>=1000&&v<=8000){S.map.size=v;save();Map_.refresh();renderAll();}};
+  const link=(k)=>e=>{S.map[k]=e.target.value.trim();S.map[k+'Up']=false;save();Map_.srcKey='';Map_.refresh();};
+  $('#msIcons').onchange=link('icons');$('#msRaw').onchange=link('raw');
+  const up=(k)=>async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;const ok=await IDB.set('map-'+k,f);
+    if(!ok){$('#ms'+(k==='icons'?'Icons':'Raw')+'Note').textContent='This browser would not store the picture.';return;}
+    S.map[k+'Up']=true;S.map.view=k;save();Map_.srcKey='';Map_.refresh();};
+  $('#msIconsFile').onchange=up('icons');$('#msRawFile').onchange=up('raw');
+  // side panel
+  $('#mapside').addEventListener('click',e=>{const b=e.target.closest('button[data-act]');if(!b)return;
+    if(b.dataset.act==='closeside'){Map_.sel=null;Map_.hl=null;Map_.refresh();}
+    if(b.dataset.act==='placepin'){Map_.mode='move';Map_.moving=b.dataset.pin;Map_.hint();}
+    if(b.dataset.act==='askdelpin'){const h=b.parentElement;const pid=h.dataset.delpin;const n=vendorsAt(pid).length;
+      askConfirm(h,n?`Delete this pin? Its ${n} vendor${n===1?'':'s'} will have no pin.`:'Delete this pin?',()=>{pushUndo('delete pin');vendorsAt(pid).forEach(([,v])=>v.pin=null);delete S.pins[pid];Map_.sel=null;save();renderAll();});}});
+  $('#mapside').addEventListener('change',e=>{const t=e.target;if(t.dataset.f==='pinnick'){pushUndo('rename pin');S.pins[t.dataset.pin].nick=t.value.trim();save();renderAll();}});
+}
+function mapClick(target,cx,cy){
+  const {x,y}=Map_.toWorld(cx,cy);const inside=x>=0&&x<=1&&y>=0&&y<=1;
+  if(Map_.mode==='add'){if(!inside)return;pushUndo('add pin');const id=newPin('',x,y);Map_.sel=id;Map_.mode=null;save();renderAll();
+    setTimeout(()=>{const el=$('#pinNick');if(el)el.focus();},0);return;}
+  if(Map_.mode==='move'){if(!inside)return;const p=S.pins[Map_.moving];if(p){pushUndo('move pin');p.x=x;p.y=y;Map_.sel=Map_.moving;}Map_.mode=null;Map_.moving=null;save();renderAll();return;}
+  const pe=target.closest&&target.closest('.pin');
+  Map_.sel=pe?pe.dataset.pin:null;Map_.hl=null;Map_.refresh();
+}
+
+/* ================= rendering ================= */
+function ago(t){if(!t)return '—';const m=(Date.now()-t)/60000;if(m<1)return 'just now';if(m<60)return Math.round(m)+' min ago';const h=m/60;if(h<24)return Math.round(h)+' h ago';const d=Math.round(h/24);return d+(d===1?' day ago':' days ago');}
+function seenPill(t){const old=Date.now()-(t||0)>3*864e5;return `<span class="pill${old?' old':''}" title="Last scanned">${old?'⚠ ':''}${ago(t)}</span>`;}
+function icoImg(id,cls='ico'){const ic=S.icons[id];return ic?`<img class="${cls}" src="${ic.thumb}" alt="">`:`<span class="${cls}"></span>`;}
+function nameHtml(id){if(id&&!S.icons[id])return '<span class="unnamed">Removed icon</span>';const n=iconName(id);return n?esc(n):'<span class="unnamed">Unnamed icon</span>';}
+
+function renderStats(){
+  const vs=Object.values(S.vendors);const items=vs.reduce((a,v)=>a+v.items.length,0);
+  const last=vs.reduce((a,v)=>Math.max(a,v.seen||0),0);
+  $('#stats').innerHTML=`<div class="stat"><b>${fmt(vs.length)}</b><span>Vendors</span></div><div class="stat"><b>${fmt(items)}</b><span>Listings</span></div><div class="stat"><b>${fmt(Object.keys(S.pins).length)}</b><span>Pins</span></div><div class="stat"><b>${last?ago(last):'—'}</b><span>Last scan</span></div>`;
+  $('#srvLine').innerHTML=`<b>${esc(S.server.name||'Unnamed server')}</b> · map ${fmt(S.map.size)} · wipe started ${ago(S.server.since)}`;
+  const nb=$('#noticeBanner');nb.hidden=!S.notice;
+  if(S.notice==='migrated')$('#noticeText').textContent='Your shops from before this update are kept, but they have no map spot yet. Place their pins from the Map tab, or start fresh for Orange Dream with New wipe on the Backup & wipe tab (copy a backup first).';
+}
+let side='sell';
+function renderFind(){
+  const q=norm($('#q').value);const hide=$('#hideSold').checked;const out=[];
+  for(const [vid,v] of Object.entries(S.vendors))for(const it of v.items){
+    if(hide&&(it.sold||!it.stock))continue;
+    const target=side==='sell'?it.icon:it.costIcon;
+    if(q&&!norm(iconName(target)).includes(q))continue;
+    out.push({vid,v,it,each:it.cost/(it.qty||1)});
+  }
+  const key=o=>norm(iconName(side==='sell'?o.it.icon:o.it.costIcon));
+  out.sort((a,b)=>{const ka=key(a),kb=key(b);if(!ka!==!kb)return ka?-1:1;if(ka!==kb)return ka<kb?-1:1;
+    const ca=norm(iconName(a.it.costIcon)),cb=norm(iconName(b.it.costIcon));if(ca!==cb)return ca<cb?-1:1;
+    if(!!a.it.sold!==!!b.it.sold)return a.it.sold?1:-1;return a.each-b.each;});
+  const tb=$('#results tbody');
+  if(!out.length){tb.innerHTML=`<tr><td colspan="8" class="empty">${Object.keys(S.vendors).length?'No listings match that search.':'No vendors yet. Go to Scan and drop in your first screenshots.'}</td></tr>`;$('#resultNote').textContent='';return;}
+  tb.innerHTML=out.slice(0,400).map(({vid,v,it})=>{
+    const stock=it.sold||!it.stock?'<span class="pill sold">Sold out</span>':fmt(it.stock);
+    const p=S.pins[v.pin];const placed=p&&p.x!=null;
+    return `<tr><td><div class="item">${icoImg(it.icon)}<span>${nameHtml(it.icon)}</span></div></td><td class="num">${fmt(it.qty)}</td>
+    <td><div class="price">${icoImg(it.costIcon,'ico sm')}<span>${fmt(it.cost)} ${nameHtml(it.costIcon)}</span></div></td>
+    <td class="num">${stock}</td><td>${esc(vName(v))}</td><td>${p?esc(pinLabel(v.pin)):'<span class="unnamed">No pin</span>'}</td><td>${seenPill(v.seen)}</td>
+    <td>${placed?`<button class="btn small mapbtn" data-map="${vid}">Show on map</button>`:''}</td></tr>`;}).join('');
+  $('#resultNote').textContent=out.length>400?`Showing the first 400 of ${fmt(out.length)} listings. Search to narrow it down.`:`${fmt(out.length)} listing${out.length===1?'':'s'}.`;
+}
+
+function slotHtml(ci,si,ri,k,sl){
+  const cls=!sl.name?'new':(sl.conf==='user'||sl.conf==='auto')?'ok':sl.conf;
+  return `<div class="slot"><img class="ico sm" src="${sl.thumb}" alt=""><input type="text" list="iconNames" class="${cls}"${sl.conf==='auto'?' title="Filled in from another box. Type here to change just this one."':''} value="${esc(sl.name)}" placeholder="Name this item" data-ci="${ci}" data-si="${si}" data-ri="${ri}" data-k="${k}" aria-label="${k==='sell'?'Item sold':'Paid with'}"></div>`;
+}
+function pinOptions(sel){
+  const ids=Object.keys(S.pins).sort((a,b)=>pinLabel(a).localeCompare(pinLabel(b),undefined,{numeric:true}));
+  return ids.map(id=>`<option value="${id}"${id===sel?' selected':''}>${esc(pinLabel(id))}</option>`).join('');
+}
+function renderCards(){
+  const box=$('#cards');
+  $('#bulkActions').hidden=!pending.some(c=>c.status==='review');
+  box.innerHTML=pending.map((c,ci)=>{
+    if(c.status==='saved')return '';
+    if(c.status==='reading'||c.status==='ocr')return `<div class="card"><div class="busy">${esc(c.file)}: ${c.status==='reading'?'finding the shop panel…':'reading names and numbers…'}</div></div>`;
+    if(c.status==='error')return `<div class="card"><div class="meta"><h3>${esc(c.file)}</h3><div class="warns">${esc(c.error)}</div></div><div class="cardfoot"><span></span><button class="btn small" data-act="discard" data-ci="${ci}">Remove</button></div></div>`;
+    const P=S.pins[c.pin];
+    const here=P?vendorsAt(c.pin):[];
+    const openedHere=new Set(here.map(([,v])=>norm(v.name)));
+    const chips=c.others.map(n=>`<span class="chip${!isGeneric(n)&&openedHere.has(norm(n))?' done':''}">${esc(n)}</span>`).join('');
+    let unnamed=0,guesses=0,flags=0;const targets={};
+    const secHtml=c.sections.map((s,si)=>{
+      if(s.target!=='new')targets[s.target]=(targets[s.target]||0)+1;
+      const V=s.target!=='new'?S.vendors[s.target]:null;
+      const genHere=here.filter(([id,v])=>isGeneric(v.name)&&id!==s.target).length;
+      const rows=s.rows.map((r,ri)=>{
+        unnamed+=(!r.sell.name)+(!r.cost.name);guesses+=(r.sell.conf==='guess')+(r.cost.conf==='guess');
+        const f=rowFlags(r,s);flags+=Object.keys(f).length;
+        const num=(fld,lbl)=>`<input class="qty${f[fld]?' flag':''}" type="number" min="0" value="${r[fld]??''}" aria-label="${lbl}"${f[fld]?` title="${esc(f[fld])}"`:''} data-ci="${ci}" data-si="${si}" data-ri="${ri}" data-f="${fld}">`;
+        const notes=Object.values(f);
+        return `<div class="redit${r.sold?' sold':''}">${slotHtml(ci,si,ri,'sell',r.sell)}${num('qty','Quantity')}${slotHtml(ci,si,ri,'cost',r.cost)}${num('costQty','Cost amount')}${r.sold?`<span class="pill sold">Sold out</span>`:num('stock','In stock')}</div>${notes.length?`<div class="flagtxt">⚠ ${notes.map(esc).join(' ')}</div>`:''}`;
+      }).join('');
+      return `<div class="field"><label class="label" for="sn-${c.id}-${si}">Shop name in game</label><input type="text" id="sn-${c.id}-${si}" value="${esc(s.name)}" placeholder="Shop name" data-ci="${ci}" data-si="${si}" data-f="sname"></div>
+        <div class="vsel"><label class="label" for="vt-${c.id}-${si}">Update which vendor?</label>
+          <select id="vt-${c.id}-${si}" data-ci="${ci}" data-si="${si}" data-f="target"${P?'':' disabled'}><option value="new">New vendor</option>${here.map(([id,v])=>`<option value="${id}"${id===s.target?' selected':''}>${esc(vName(v))}${v.nick?' ('+esc(v.name)+')':''}: ${v.items.length?v.items.length+' item'+(v.items.length===1?'':'s'):'no listings'}, seen ${ago(v.seen)}</option>`).join('')}</select>
+          ${!P?'<span class="note">Pick a map pin first to see its vendors.</span>':''}
+          ${V?`<div class="mini">${V.items.slice(0,10).map(i=>icoImg(i.icon,'')).join('')}<span class="note">${s.why&&!s.userTarget?'Suggested: '+esc(s.why)+' Check before saving.':'Last time it sold these.'}</span></div>`:''}
+          ${s.target==='new'&&isGeneric(s.name)&&genHere?`<span class="note">There ${genHere===1?'is 1 other "A Shop"':'are '+genHere+' other "A Shop"s'} at this pin. If this is one of them, pick it above.</span>`:''}
+          <input type="text" value="${esc(s.nick||(V?V.nick:''))}" placeholder="Your nickname for this vendor (optional)" data-ci="${ci}" data-si="${si}" data-f="vnick" aria-label="Vendor nickname">
+        </div>
+        ${s.empty?`<div class="redit sold"><span class="note" style="color:#f0a093">This vendor has no listings.</span></div>`:`<div class="rowsedit"><div class="redit head"><span class="hdr">Selling</span><span class="hdr">Qty</span><span class="hdr">Costs</span><span class="hdr">Amount</span><span class="hdr">Stock</span></div>${rows}</div>`}`;
+    }).join('');
+    const warns=[...c.warn];
+    if(!P)warns.push('Pick a map pin.');
+    if(Object.values(targets).some(n=>n>1))warns.push('Two shops are set to update the same vendor.');
+    if(unnamed)warns.push(`${unnamed} icon${unnamed>1?'s still need':' still needs'} a name.`);
+    if(guesses)warns.push(`${guesses} amber name${guesses>1?'s are':' is'} a best guess.`);
+    if(flags)warns.push(`${flags} number${flags>1?'s look':' looks'} off. Check the boxes marked ⚠.`);
+    return `<div class="card">
+      <img class="preview" src="${c.preview}" alt="Shop panel from ${esc(c.file)}">
+      <div class="meta">
+        <div class="inline" style="justify-content:space-between"><span class="label">${esc(c.file)}</span>${c.total?`<span class="pill">${c.total} shop${c.total>1?'s':''} here</span>`:''}</div>
+        <div class="field"><label class="label" for="pin-${c.id}">Map pin</label>
+          <select id="pin-${c.id}" data-ci="${ci}" data-f="pin"><option value="">Choose a pin…</option>${pinOptions(c.pin)}<option value="__new">+ New pin…</option></select>
+          ${c.newPin?`<div class="newpin"><input type="text" id="np-${c.id}" placeholder="Nickname for the new pin, e.g. FG Market"><button class="btn small primary" data-act="mkpin" data-ci="${ci}">Create pin</button></div><span class="note">You can place it on the map afterwards.</span>`:''}
+        </div>
+        ${secHtml}
+        ${chips?`<div class="field"><span class="label">Also at this spot</span><div class="chips">${chips}</div></div>`:''}
+      </div>
+      <div class="cardfoot"><div class="warns">${warns.map(esc).join(' ')}</div><div class="inline"><button class="btn small" data-act="discard" data-ci="${ci}">Discard</button><button class="btn small primary" data-act="save" data-ci="${ci}">Save</button></div></div>
+    </div>`;}).join('');
+}
+function renderShops(){
+  const groups=new Map();
+  for(const id of Object.keys(S.pins))groups.set(id,[]);
+  groups.set('_none',[]);
+  for(const [vid,v] of Object.entries(S.vendors)){const k=v.pin&&S.pins[v.pin]?v.pin:'_none';groups.get(k).push([vid,v]);}
+  const order=[...groups.keys()].filter(k=>k!=='_none'||groups.get(k).length).sort((a,b)=>(a==='_none')-(b==='_none')||pinLabel(a).localeCompare(pinLabel(b),undefined,{numeric:true}));
+  if(!order.length){$('#locs').innerHTML='<div class="empty">No vendors or pins yet. Add pins on the Map tab, or scan screenshots.</div>';return;}
+  const pinSel=(vid,cur)=>`<select data-f="vpin" data-vid="${vid}" aria-label="Map pin"><option value="">No pin</option>${pinOptions(cur)}</select>`;
+  $('#locs').innerHTML=order.map(pid=>{
+    const list=groups.get(pid).sort((a,b)=>vName(a[1]).localeCompare(vName(b[1])));
+    const P=S.pins[pid];
+    const opened=new Set(list.map(([,v])=>norm(v.name)));
+    const unopened=P?(P.names||[]).filter(n=>!isGeneric(n)&&!opened.has(norm(n))):[];
+    const genLeft=P?Math.max(0,(P.genericSeen||0)-list.filter(([,v])=>isGeneric(v.name)).length):0;
+    const total=Math.max(P?.total||0,list.length+unopened.length+genLeft);
+    const pct=total?Math.round(list.length/total*100):100;const g=pinGrid(P);
+    return `<div class="loc">
+      <div class="lochead"><h3>${P?esc(P.nick||g||'Unnamed pin'):'<span class="unnamed">No pin</span>'}</h3><span class="inline">${P?`<span class="note">${g?'Grid '+g:'Not on the map yet'}</span>`:''}${P&&P.x!=null?`<button class="btn small" data-mappin="${pid}">Show on map</button>`:''}${P?`<span class="note">${total?list.length+' of '+total+' scanned':'No vendors yet'}</span>`:''}</span></div>
+      ${P?`<div class="bar" aria-hidden="true"><i style="width:${pct}%"></i></div>
+      <div class="inline" style="margin-bottom:8px"><label class="label" for="pn-${pid}">Pin nickname</label><input type="text" id="pn-${pid}" value="${esc(P.nick)}" placeholder="e.g. FG Market" data-f="pinnick" data-pin="${pid}" style="flex:0 1 220px"></div>`:'<p class="note">These vendors were saved without a pin. Pick one for each below.</p>'}
+      <div class="shoplist">
+        ${list.map(([vid,v])=>`<details class="shop"><summary><span><span class="sname">${esc(vName(v))}</span>${v.nick?` <span class="vgame">in game: ${esc(v.name)}</span>`:''}</span><span class="inline">${v.empty&&!v.items.length?'<span class="pill">No listings</span>':`<span class="note">${v.items.length} item${v.items.length===1?'':'s'}</span>`}${seenPill(v.seen)}</span></summary>
+          <div class="body">${v.items.length?v.items.map(listingRow).join(''):'<span class="note">No listings.</span>'}
+          <div class="inline"><label class="label" for="vn-${vid}">Nickname</label><input type="text" id="vn-${vid}" value="${esc(v.nick)}" placeholder="Your name for this vendor" data-f="vnick" data-vid="${vid}" style="flex:0 1 220px">
+          <label class="label">Pin</label>${pinSel(vid,v.pin)}
+          <span class="confirm" data-delvid="${vid}"><button class="btn small danger" data-act="askdelv">Delete vendor</button></span></div></div></details>`).join('')}
+        ${unopened.map(n=>`<div class="unscanned"><span>${esc(n)}</span><span class="inline"><span class="note">not opened yet</span><button class="btn small" data-act="markempty" data-pin="${pid}" data-name="${esc(n)}" title="The shop says it has no listings">No listings</button></span></div>`).join('')}
+        ${genLeft?`<div class="unscanned"><span>A Shop ${genLeft>1?'×'+genLeft:''}</span><span class="inline"><span class="note">default name, not opened yet</span><button class="btn small" data-act="markempty" data-pin="${pid}" data-name="A Shop" title="One of them says it has no listings">No listings</button></span></div>`:''}
+      </div></div>`;}).join('');
+}
+function renderIcons(){
+  const ents=Object.entries(S.icons);
+  const used=new Map();for(const v of Object.values(S.vendors))for(const it of v.items){used.set(it.icon,(used.get(it.icon)||0)+1);used.set(it.costIcon,(used.get(it.costIcon)||0)+1);}
+  ents.sort((a,b)=>(!!a[1].name-!!b[1].name)||a[1].name.localeCompare(b[1].name));
+  $('#icongrid').innerHTML=ents.length?ents.map(([id,ic])=>`<div class="iconcard${ic.name?'':' needs'}" data-card="${id}"><img class="ico" src="${ic.thumb}" alt=""><div style="display:grid;gap:6px;flex:1;min-width:0">
+    <input type="text" list="iconNames" value="${esc(ic.name)}" placeholder="Name this icon" data-icon="${id}" aria-label="Icon name">
+    <div class="looks" aria-label="Learned looks">${ic.samples.map((sm,i)=>`<span class="look"><canvas width="${FP}" height="${FP}" data-fp="${id}:${i}"></canvas>${ic.samples.length>1?`<button title="Remove this look" aria-label="Remove this look" data-rmlook="${id}:${i}">×</button>`:''}</span>`).join('')}</div>
+    <div class="acts"><span class="note">${used.get(id)||0} listing${used.get(id)===1?'':'s'}</span><span class="confirm" data-delicon="${id}"><button class="btn small danger" data-act="askdelicon">Delete</button></span></div>
+  </div></div>`).join(''):'<div class="empty">No icons learned yet. They appear here as you scan.</div>';
+  document.querySelectorAll('#icongrid canvas[data-fp]').forEach(cv=>{const [id,i]=cv.dataset.fp.split(':');const a=fpArr(S.icons[id].samples[+i]);const g=cv.getContext('2d');const im=g.createImageData(FP,FP);
+    for(let k=0;k<FP*FP;k++){im.data[k*4]=a[k*3];im.data[k*4+1]=a[k*3+1];im.data[k*4+2]=a[k*3+2];im.data[k*4+3]=255;}g.putImageData(im,0,0);});
+}
+function renderLists(){
+  const names=[...new Set(Object.values(S.icons).map(i=>i.name).filter(Boolean))].sort();
+  $('#iconNames').innerHTML=names.map(n=>`<option value="${esc(n)}">`).join('');
+}
+function updateBadges(){
+  const n=pending.filter(c=>c.status==='review').length;const b=$('#scanBadge');b.hidden=!n;b.textContent=n;
+  const u=Object.values(S.icons).filter(i=>!i.name).length;const ib=$('#iconBadge');ib.hidden=!u;ib.textContent=u;
+  const up=Object.values(S.pins).filter(p=>p.x==null).length;const mb=$('#mapBadge');mb.hidden=!up;mb.textContent=up;mb.title=`${up} pin${up===1?'':'s'} not on the map yet`;
+}
+function renderWipe(){
+  const set=(id,v)=>{const el=$(id);if(document.activeElement!==el)el.value=v??'';};
+  set('#nwName',S.server.name);set('#nwSize',S.map.size);set('#nwIcons',S.map.iconsUp?'':S.map.icons);set('#nwRaw',S.map.rawUp?'':S.map.raw);
+}
+function renderUndo(){const b=$('#undoBtn');const u=undoStack[undoStack.length-1];b.hidden=!u;if(u)b.textContent='Undo '+u.label;}
+function renderAll(){renderUndo();renderStats();renderLists();renderFind();renderShops();renderIcons();updateBadges();renderWipe();$('#exportBox').value=JSON.stringify(S);Map_.refresh();}
+
+/* ================= events ================= */
+let curTab='find';
+function showTab(t){curTab=t;document.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t));document.querySelectorAll('.panel').forEach(p=>p.hidden=p.id!=='panel-'+t);
+  try{localStorage.setItem(KEY+'.tab',t);}catch(e){}
+  if(t==='backup')$('#exportBox').value=JSON.stringify(S);
+  if(t==='map'&&!Map_.fitted)requestAnimationFrame(()=>Map_.fitView());}
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.tab)));
+$('#q').addEventListener('input',renderFind);$('#hideSold').addEventListener('change',renderFind);
+$('#sideSell').onclick=()=>{side='sell';$('#sideSell').setAttribute('aria-pressed','true');$('#sideBuy').setAttribute('aria-pressed','false');renderFind();};
+$('#sideBuy').onclick=()=>{side='buy';$('#sideBuy').setAttribute('aria-pressed','true');$('#sideSell').setAttribute('aria-pressed','false');renderFind();};
+$('#results').addEventListener('click',e=>{const b=e.target.closest('button[data-map]');if(!b)return;const v=S.vendors[b.dataset.map];if(v&&v.pin)Map_.focus(v.pin,b.dataset.map);});
+$('#noticeClose').onclick=()=>{S.notice=null;save();renderStats();};
+function addFiles(files){const imgs=[...files].filter(f=>f.type.startsWith('image/'));if(!imgs.length)return;showTab('scan');getOcr();
+  (async()=>{for(const f of imgs)await scanFile(f);})();}
+const drop=$('#drop');
+drop.addEventListener('click',()=>$('#file').click());
+drop.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('#file').click();}});
+$('#file').addEventListener('change',e=>{addFiles(e.target.files);e.target.value='';});
+['dragenter','dragover'].forEach(ev=>document.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>document.addEventListener(ev,e=>{e.preventDefault();if(ev==='drop'||e.target===drop)drop.classList.remove('over');}));
+document.addEventListener('drop',e=>{if(e.dataTransfer?.files?.length)addFiles(e.dataTransfer.files);});
+document.addEventListener('paste',e=>{const fs=[...(e.clipboardData?.items||[])].filter(i=>i.kind==='file').map(i=>i.getAsFile()).filter(Boolean);if(fs.length){e.preventDefault();addFiles(fs);}});
+
+function setCardPin(c,pid){
+  c.pin=pid;c.newPin=false;c.sections.forEach(s=>{if(s.target!=='new'&&!(S.vendors[s.target]&&S.vendors[s.target].pin===pid)){s.target='new';s.userTarget=false;}});
+  assignTargets(c);
+  // carry the pin to later screenshots of the same cluster that have none yet
+  const names=new Set(realNames(c));
+  for(const p of pending.slice(pending.indexOf(c)+1)){if(p.status!=='review'||p.pin)continue;
+    const pn=realNames(p);if(pn.some(n=>names.has(n))||(c.total>1&&p.total===c.total)){p.pin=pid;assignTargets(p);pn.forEach(n=>names.add(n));}}
+}
+$('#cards').addEventListener('change',e=>{
+  const t=e.target;const c=pending[+t.dataset.ci];if(!c)return;
+  if(t.dataset.k){const sl=c.sections[+t.dataset.si].rows[+t.dataset.ri][t.dataset.k];applyName(sl.fp,t.value.trim(),sl);assignTargets(c);renderCards();return;}
+  const f=t.dataset.f;
+  if(f==='pin'){if(t.value==='__new'){c.newPin=true;renderCards();setTimeout(()=>{const el=$('#np-'+c.id);if(el)el.focus();},0);return;}setCardPin(c,t.value);renderCards();return;}
+  const sec=c.sections[+t.dataset.si];
+  if(f==='sname'){sec.name=t.value.trim();if(!sec.userTarget)assignTargets(c);renderCards();return;}
+  if(f==='target'){sec.target=t.value;sec.userTarget=true;sec.why='';renderCards();return;}
+  if(f==='vnick'){sec.nick=t.value.trim();return;}
+  const r=sec.rows[+t.dataset.ri];r[f]=t.value===''?null:parseInt(t.value,10);renderCards();
+});
+$('#cards').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-act]');if(!b)return;const c=pending[+b.dataset.ci];if(!c)return;
+  if(b.dataset.act==='mkpin'){const nick=($('#np-'+c.id)?.value||'').trim();pushUndo('add pin');const id=newPin(nick);save();setCardPin(c,id);renderAll();renderCards();return;}
+  if(b.dataset.act==='save')saveCard(c);
+  if(b.dataset.act==='discard')c.status='saved';
+  pending=pending.filter(p=>p.status!=='saved');renderAll();renderCards();
+});
+$('#saveAll').onclick=()=>{if(pending.some(c=>c.status==='review'))pushUndo('save all scans');pending.forEach(c=>{if(c.status==='review')saveCard(c,true);});pending=pending.filter(p=>p.status!=='saved');renderAll();renderCards();showTab('find');};
+$('#discardAll').onclick=()=>{pending=pending.filter(p=>p.status==='reading'||p.status==='ocr');renderCards();updateBadges();};
+
+$('#icongrid').addEventListener('change',e=>{const id=e.target.dataset.icon;if(!id||!S.icons[id])return;const name=e.target.value.trim();
+  const other=name?iconIdByName(name):null;
+  if(other&&other!==id){
+    const acts=e.target.closest('.iconcard').querySelector('.acts');
+    acts.innerHTML=`<span class="note">"${esc(S.icons[other].name)}" already exists. Merge these into one?</span><button class="btn small danger">Merge</button><button class="btn small">Cancel</button>`;
+    const [yes,no]=acts.querySelectorAll('button');
+    yes.onclick=()=>{pushUndo('merge icons');const a=S.icons[other],b=S.icons[id];a.samples=[...a.samples,...b.samples].slice(0,6);
+      for(const v of Object.values(S.vendors))for(const it of v.items){if(it.icon===id)it.icon=other;if(it.costIcon===id)it.costIcon=other;}
+      for(const H of Object.values(S.history))for(const h of H){const [a1,b1]=h.k.split('>');h.k=(a1===id?other:a1)+'>'+(b1===id?other:b1);}
+      delete S.icons[id];save();renderAll();};
+    no.onclick=()=>renderIcons();return;
+  }
+  pushUndo('rename icon');S.icons[id].name=name;save();renderAll();});
+$('#icongrid').addEventListener('click',e=>{
+  const rm=e.target.closest('button[data-rmlook]');
+  if(rm){const [id,i]=rm.dataset.rmlook.split(':');const ic=S.icons[id];if(!ic||ic.samples.length<2)return;pushUndo('remove a look');ic.samples.splice(+i,1);save();renderAll();return;}
+  const del=e.target.closest('button[data-act="askdelicon"]');
+  if(del){const h=del.parentElement;askConfirm(h,'Delete this icon? Listings using it show as removed until you rescan them.',()=>{pushUndo('delete icon');delete S.icons[h.dataset.delicon];save();renderAll();});}
+});
+$('#locs').addEventListener('change',e=>{const t=e.target;
+  if(t.dataset.f==='pinnick'){pushUndo('rename pin');S.pins[t.dataset.pin].nick=t.value.trim();save();renderAll();}
+  if(t.dataset.f==='vnick'){pushUndo('rename vendor');S.vendors[t.dataset.vid].nick=t.value.trim();save();renderAll();}
+  if(t.dataset.f==='vpin'){pushUndo('move vendor');S.vendors[t.dataset.vid].pin=t.value||null;save();renderAll();}
+});
+// in-page confirmations (the viewer blocks confirm())
+function askConfirm(holder,label,onYes){const orig=holder.innerHTML;holder.innerHTML=`<span class="note">${esc(label)}</span><button class="btn small danger">Yes</button><button class="btn small">Cancel</button>`;
+  const [yes,no]=holder.querySelectorAll('button');yes.onclick=()=>{onYes();};no.onclick=()=>{holder.innerHTML=orig;bindStatic();};}
+$('#locs').addEventListener('click',e=>{
+  const mp=e.target.closest('button[data-mappin]');if(mp){Map_.focus(mp.dataset.mappin);return;}
+  const me=e.target.closest('button[data-act="markempty"]');
+  if(me){const pid=me.dataset.pin,name=me.dataset.name;pushUndo('mark '+name+' empty');const id=uid();
+    S.vendors[id]={name,nick:'',pin:pid,items:[],empty:true,seen:Date.now(),created:Date.now()};save();renderAll();return;}
+  const b=e.target.closest('button[data-act="askdelv"]');if(!b)return;const h=b.parentElement;
+  askConfirm(h,'Delete this vendor and its price history?',()=>{pushUndo('delete vendor');delete S.vendors[h.dataset.delvid];delete S.history[h.dataset.delvid];save();renderAll();});});
+let backupCopied=false;
+function copyText(txt,note){navigator.clipboard?.writeText(txt).then(()=>{note.textContent='Copied.';backupCopied=true;},()=>{note.textContent='Copy failed. Use the Export box above: select it and press Ctrl+C.';})
+  ?? (note.textContent='Copy failed. Use the Export box above: select it and press Ctrl+C.');}
+function bindStatic(){
+  const r=$('#resetBtn');if(r)r.onclick=()=>askConfirm($('#resetArea'),'Delete all vendors, pins, history and icons?',()=>{pushUndo('delete everything');S=blank();save();renderAll();$('#resetArea').innerHTML='<button class="btn danger" id="resetBtn">Delete everything</button>';bindStatic();});
+  const nw=$('#nwBtn');if(nw)nw.onclick=()=>askConfirm($('#nwArea'),backupCopied?'Clear all vendors, pins and prices and start the new wipe?':'You haven\'t copied a backup yet. Start the new wipe anyway?',()=>{
+    pushUndo('new wipe');
+    const name=$('#nwName').value.trim(),size=parseInt($('#nwSize').value,10)||S.map.size,icons=$('#nwIcons').value.trim(),raw=$('#nwRaw').value.trim();
+    const keep=S.icons;S=blank();S.icons=keep;S.server={name,since:Date.now()};
+    S.map={...DEFAULT_MAP,size,icons,raw,grid:false,iconsUp:false,rawUp:false};
+    Map_.sel=null;Map_.srcKey='';save();renderAll();
+    $('#nwArea').innerHTML='<button class="btn danger" id="nwBtn">Start new wipe</button>';$('#nwNote').textContent='New wipe started. Learned icons were kept.';bindStatic();});
+}
+bindStatic();
+$('#undoBtn').onclick=undo;
+$('#copyExport').onclick=()=>{const t=$('#exportBox');t.value=JSON.stringify(S);copyText(t.value,$('#copyNote'));};
+$('#nwCopy').onclick=()=>copyText(JSON.stringify(S),$('#nwNote'));
+function doImport(text){try{const d=migrate(JSON.parse(text));if(!d)throw new Error('not Rust Shop Finder data');pushUndo('import');S=d;save();Map_.srcKey='';renderAll();$('#importNote').textContent='Imported.';}catch(e){$('#importNote').textContent='That text could not be imported: '+e.message+'.';}}
+$('#importBtn').onclick=()=>doImport($('#importBox').value);
+$('#importFile').addEventListener('change',async e=>{const f=e.target.files[0];if(f)doImport(await f.text());e.target.value='';});
+
+/* ================= boot ================= */
+load();
+initMap();
+renderAll();
+try{const t=localStorage.getItem(KEY+'.tab');if(t&&document.getElementById('tab-'+t))showTab(t);}catch(e){}
+</script>
+
+</body>
+</html>
